@@ -12,3 +12,4 @@ CREATE INDEX documents_owner ON identity_documents(owner_id);
 CREATE TABLE event_window(id INTEGER PRIMARY KEY CHECK(id=1),opens_at INTEGER,closes_at INTEGER,edits_until INTEGER,updated_at INTEGER NOT NULL DEFAULT 0);
 INSERT INTO event_window(id) VALUES(1);
 DELETE FROM assignments WHERE EXISTS(SELECT 1 FROM competitions c WHERE c.id=assignments.competition_id AND c.published=0) AND EXISTS(SELECT 1 FROM registrations r JOIN users j ON j.id=assignments.judge_id WHERE r.competition_id=assignments.competition_id AND r.status='submitted' AND r.school_key=j.school_key);
+DELETE FROM assignments WHERE EXISTS(SELECT 1 FROM competitions c WHERE c.id=assignments.competition_id AND c.published=0) AND EXISTS(SELECT 1 FROM users j WHERE j.id=assignments.judge_id AND j.role<>'judge');
