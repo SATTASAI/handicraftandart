@@ -1169,7 +1169,7 @@ async function api(r, env) {
     const id = url.searchParams.get("competition");
     const candidates = (
       await env.DB.prepare(
-        "SELECT j.id,j.name,j.school FROM users j WHERE j.approval_status='approved' AND j.role IN ('judge','admin') AND NOT EXISTS(SELECT 1 FROM registrations r WHERE r.competition_id=? AND r.status='submitted' AND (r.user_id=j.id OR r.school_key=j.school_key)) ORDER BY j.name",
+        "SELECT j.id,j.name,j.school FROM users j WHERE j.approval_status='approved' AND j.role='judge' AND j.identity_document_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM registrations r WHERE r.competition_id=? AND r.status='submitted' AND (r.user_id=j.id OR r.school_key=j.school_key)) ORDER BY j.name",
       )
         .bind(id)
         .all()
@@ -1195,7 +1195,7 @@ async function api(r, env) {
     const n = Math.max(0, target - existing.n);
     const candidates = (
       await env.DB.prepare(
-        "SELECT j.id FROM users j WHERE j.approval_status='approved' AND j.role IN ('judge','admin') AND NOT EXISTS(SELECT 1 FROM registrations r WHERE r.competition_id=? AND r.status='submitted' AND (r.user_id=j.id OR r.school_key=j.school_key)) AND NOT EXISTS(SELECT 1 FROM assignments WHERE competition_id=? AND judge_id=j.id) ORDER BY (SELECT COUNT(*) FROM assignments WHERE judge_id=j.id),j.name,j.id LIMIT ?",
+        "SELECT j.id FROM users j WHERE j.approval_status='approved' AND j.role='judge' AND j.identity_document_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM registrations r WHERE r.competition_id=? AND r.status='submitted' AND (r.user_id=j.id OR r.school_key=j.school_key)) AND NOT EXISTS(SELECT 1 FROM assignments WHERE competition_id=? AND judge_id=j.id) ORDER BY (SELECT COUNT(*) FROM assignments WHERE judge_id=j.id),j.name,j.id LIMIT ?",
       )
         .bind(id, id, n)
         .all()
@@ -1229,6 +1229,19 @@ async function api(r, env) {
       .bind(safeText(b.judge_id))
       .first();
     if (!judge) fail(400, "บัญชีนี้ยังไม่มีสิทธิ์กรรมการ");
+    if (
+      c.workflow_version &&
+      !b.remove &&
+      !(await env.DB.prepare(
+        "SELECT 1 FROM users WHERE id=? AND role='judge' AND identity_document_id IS NOT NULL",
+      )
+        .bind(judge.id)
+        .first())
+    )
+      fail(
+        409,
+        "รายการนี้ต้องใช้บัญชีกรรมการที่แนบหลักฐานและผ่านการยืนยันแล้ว",
+      );
     if (
       !b.remove &&
       (await env.DB.prepare(

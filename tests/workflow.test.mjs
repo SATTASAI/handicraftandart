@@ -231,6 +231,17 @@ test("verified workflow: private identity, approval, separate deadlines, whole-c
       )
     ).body.candidates.some((j) => j.id === conflicting.body.user.id),
   );
+  assert.equal(
+    (
+      await call(
+        "/admin/assignment",
+        { competition_id: competition, judge_id: admin.body.user.id },
+        admin.cookie,
+      )
+    ).status,
+    409,
+    "an organizer without a verified judge identity is not a jury candidate",
+  );
   const judges = [];
   for (let i = 0; i < 3; i++) {
     const j = await signup("judge" + i, "โรงเรียนกรรมการ " + i, "judge");
