@@ -9,6 +9,8 @@ import {
   safeText,
   validPassword,
 } from "./security.js";
+const EVENT_TITLE =
+  "งานศิลปหัตถกรรม ศูนย์เครือข่ายสองพี่น้อง ห้วยแม่เพรียง ป่าเด็ง ประจำปีการศึกษา 2569";
 class HttpError extends Error {
   constructor(status, message) {
     super(message);
@@ -94,6 +96,20 @@ async function results(env, competitionId) {
     medal: medal(Math.round(x.score * 100) / 100),
   }));
 }
+function emailReady(env) {
+  try {
+    const url = new URL(env.SITE_URL);
+    return Boolean(
+      env.RESEND_API_KEY &&
+      env.MAIL_FROM &&
+      url.protocol === "https:" &&
+      !url.username &&
+      !url.password,
+    );
+  } catch {
+    return false;
+  }
+}
 async function api(r, env) {
   const url = new URL(r.url),
     path = url.pathname,
@@ -113,7 +129,7 @@ async function api(r, env) {
     return json({
       ok: true,
       adminSetupComplete: Boolean(setup),
-      release: "login-required-2026-11-02",
+      release: "competition-operations-2569",
     });
   }
   if (path === "/api/competitions" && method === "GET") {
@@ -347,12 +363,12 @@ async function api(r, env) {
       fail(409, "ส่งรายการแล้ว หากต้องการแก้ไขให้ติดต่อผู้จัดงาน");
     const students = Array.isArray(b.students)
       ? b.students.map((s) => ({
-          name: safeText(s.name, 100),
-          grade: safeText(s.grade, 10),
+          name: safeText(s?.name, 100),
+          grade: safeText(s?.grade, 10),
         }))
       : [];
     const coaches = Array.isArray(b.coaches)
-      ? b.coaches.map((s) => ({ name: safeText(s.name, 100) }))
+      ? b.coaches.map((s) => ({ name: safeText(s?.name, 100) }))
       : [];
     const draft = b.status === "draft";
     if (students.length > c.max_students || coaches.length > c.max_coaches)
@@ -375,7 +391,7 @@ async function api(r, env) {
       fail(400, "ลิงก์ผลงานต้องเป็น HTTPS");
     const id = existing?.id || crypto.randomUUID();
     const saved = await env.DB.prepare(
-      "INSERT INTO registrations(id,user_id,competition_id,school,students,coaches,status,created_at,work_url) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,competition_id) DO UPDATE SET students=excluded.students,coaches=excluded.coaches,status=excluded.status,work_url=excluded.work_url WHERE registrations.status='draft'",
+      "INSERT INTO registrations(id,user_id,competition_id,school,students,coaches,status,created_at,work_url) SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM competitions WHERE id=? AND registration_open=1 AND published=0) ON CONFLICT(user_id,competition_id) DO UPDATE SET students=excluded.students,coaches=excluded.coaches,status=excluded.status,work_url=excluded.work_url WHERE registrations.status='draft'",
     )
       .bind(
         id,
@@ -387,6 +403,7 @@ async function api(r, env) {
         draft ? "draft" : "submitted",
         now(),
         work,
+        c.id,
       )
       .run();
     if (!saved.meta.changes) fail(409, "รายการนี้ถูกส่งแล้ว ไม่สามารถแก้ไขได้");
@@ -433,8 +450,8 @@ async function api(r, env) {
     )
       fail(400, "คะแนนต้องอยู่ในช่วงที่กำหนด");
     const total = Math.round(values.reduce((a, b) => a + b, 0) * 100) / 100;
-    await env.DB.prepare(
-      "INSERT INTO scores VALUES(?,?,?,?,?,?) ON CONFLICT(registration_id,judge_id) DO UPDATE SET criteria=excluded.criteria,total=excluded.total,comment=excluded.comment,created_at=excluded.created_at",
+    const scored = await env.DB.prepare(
+      `INSERT INTO scores SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM registrations r JOIN competitions c ON c.id=r.competition_id JOIN assignments a ON a.competition_id=c.id WHERE r.id=? AND a.judge_id=? AND c.published=0 AND r.status='submitted') ON CONFLICT(registration_id,judge_id) DO UPDATE SET criteria=excluded.criteria,total=excluded.total,comment=excluded.comment,created_at=excluded.created_at`,
     )
       .bind(
         reg.id,
@@ -443,8 +460,12 @@ async function api(r, env) {
         total,
         safeText(b.comment, 1000),
         now(),
+        reg.id,
+        user.id,
       )
       .run();
+    if (!scored.meta.changes)
+      fail(409, "ประกาศผลแล้วหรือการมอบหมายเปลี่ยน กรุณาตรวจสอบใหม่");
     return json({ message: "บันทึกคะแนนแล้ว", total });
   }
   if (path === "/api/admin/users" && method === "GET") {
@@ -458,6 +479,125 @@ async function api(r, env) {
       assignments: (await env.DB.prepare("SELECT * FROM assignments").all())
         .results,
     });
+  }
+  if (path === "/api/admin/overview" && method === "GET") {
+    auth(user, "admin");
+    const competitions = (
+      await env.DB.prepare(
+        `SELECT c.*,
+      (SELECT COUNT(*) FROM registrations r WHERE r.competition_id=c.id AND r.status='submitted') AS teams,
+      (SELECT COUNT(*) FROM assignments a WHERE a.competition_id=c.id) AS judges,
+      (SELECT COUNT(*) FROM scores s JOIN registrations r ON r.id=s.registration_id JOIN assignments a ON a.judge_id=s.judge_id AND a.competition_id=r.competition_id WHERE r.competition_id=c.id AND r.status='submitted') AS scored
+      FROM competitions c ORDER BY c.rowid`,
+      ).all()
+    ).results;
+    const registrations = (
+      await env.DB.prepare(
+        `SELECT r.id,r.competition_id,r.school,r.students,r.coaches,r.status,r.created_at,
+      u.name AS contact_name,u.email,c.title,c.published,
+      d.status AS email_status,d.sent_at,d.last_error
+      FROM registrations r JOIN users u ON u.id=r.user_id JOIN competitions c ON c.id=r.competition_id
+      LEFT JOIN certificate_deliveries d ON d.registration_id=r.id ORDER BY r.created_at DESC`,
+      ).all()
+    ).results;
+    return json({
+      competitions,
+      registrations: registrations.map((r) => ({
+        ...r,
+        students: JSON.parse(r.students),
+        coaches: JSON.parse(r.coaches),
+      })),
+      readiness: {
+        demo: env.DEMO_MODE !== "false",
+        auth: Boolean(env.AUTH_SECRET?.length >= 32),
+        email: emailReady(env),
+      },
+    });
+  }
+  if (path === "/api/admin/certificate-email" && method === "POST") {
+    auth(user, "admin");
+    if (!emailReady(env))
+      fail(
+        503,
+        "กรุณาตั้งค่า Resend, MAIL_FROM และ SITE_URL แบบ HTTPS ก่อนส่งอีเมล",
+      );
+    const b = await body(r);
+    const reg = await env.DB.prepare(
+      `SELECT r.id,r.competition_id,u.email,u.name,c.title,c.published
+      FROM registrations r JOIN users u ON u.id=r.user_id JOIN competitions c ON c.id=r.competition_id
+      WHERE r.id=? AND r.status='submitted'`,
+    )
+      .bind(safeText(b.registration_id))
+      .first();
+    if (!reg) fail(404, "ไม่พบรายการลงทะเบียนที่ยืนยันแล้ว");
+    if (!reg.published) fail(409, "ต้องประกาศผลก่อนส่งประกาศนียบัตร");
+    const t = now();
+    // A stable provider key and a short lease prevent duplicate concurrent sends.
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO certificate_deliveries(registration_id,status,first_attempt_at,updated_at) VALUES(?,'pending',?,?)`,
+    )
+      .bind(reg.id, t, t)
+      .run();
+    const delivery = await env.DB.prepare(
+      "SELECT * FROM certificate_deliveries WHERE registration_id=?",
+    )
+      .bind(reg.id)
+      .first();
+    if (delivery.status === "sent")
+      return json({ message: "ส่งอีเมลรายการนี้แล้ว", alreadySent: true });
+    // Resend retains idempotency keys for 24h. Never retry an ambiguous request outside that window.
+    if (t - delivery.first_attempt_at >= 82800)
+      fail(
+        409,
+        "เกินช่วงส่งซ้ำอย่างปลอดภัย กรุณาตรวจประวัติใน Resend และติดต่อผู้รับโดยตรง",
+      );
+    const lock = await env.DB.prepare(
+      `UPDATE certificate_deliveries SET status='sending',updated_at=?,last_error='' WHERE registration_id=? AND (status IN ('pending','failed') OR (status='sending' AND updated_at<?))`,
+    )
+      .bind(t, reg.id, t - 90)
+      .run();
+    if (!lock.meta.changes) fail(409, "กำลังส่งอีเมลรายการนี้ กรุณารอสักครู่");
+    const link = new URL("/certificates", env.SITE_URL).href;
+    let sent;
+    try {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          Authorization: `Bearer ${env.RESEND_API_KEY}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": `certificate-${reg.id}`,
+        },
+        body: JSON.stringify({
+          from: env.MAIL_FROM,
+          to: [reg.email],
+          subject: "ประกาศนียบัตรการแข่งขันศิลปหัตถกรรม",
+          text: `เรียน ${reg.name}\n\n${EVENT_TITLE}\nประกาศผลรายการ ${reg.title} แล้ว\nดาวน์โหลดประกาศนียบัตร PDF ของนักเรียนและครูผู้ฝึกซ้อมได้ที่\n${link}\n\nกรุณาเข้าสู่ระบบด้วยบัญชีที่ใช้ลงทะเบียน เพื่อปกป้องข้อมูลผู้เข้าแข่งขัน${env.DEMO_MODE !== "false" ? "\nข้อมูลตัวอย่าง — ยังไม่ใช่ประกาศนียบัตรทางการ" : ""}`,
+        }),
+      });
+      if (response.ok) sent = await response.json();
+    } catch {}
+    if (!sent?.id) {
+      await env.DB.prepare(
+        "UPDATE certificate_deliveries SET status='failed',last_error=?,updated_at=? WHERE registration_id=?",
+      )
+        .bind(
+          "ยังยืนยันการส่งไม่ได้ ตรวจ Resend หรือกดลองใหม่ภายใน 23 ชั่วโมง",
+          now(),
+          reg.id,
+        )
+        .run();
+      fail(
+        502,
+        "ยังยืนยันการส่งอีเมลไม่ได้ สามารถลองใหม่โดยไม่ส่งซ้ำภายใน 23 ชั่วโมง",
+      );
+    }
+    await env.DB.prepare(
+      "UPDATE certificate_deliveries SET status='sent',provider_id=?,sent_at=?,updated_at=?,last_error='' WHERE registration_id=?",
+    )
+      .bind(sent.id, now(), now(), reg.id)
+      .run();
+    return json({ message: "ส่งลิงก์ดาวน์โหลดประกาศนียบัตรทางอีเมลแล้ว" });
   }
   if (path === "/api/admin/role" && method === "POST") {
     auth(user, "admin");
@@ -499,15 +639,17 @@ async function api(r, env) {
     if (b.remove) {
       await env.DB.batch([
         env.DB.prepare(
-          "DELETE FROM assignments WHERE competition_id=? AND judge_id=?",
+          "DELETE FROM assignments WHERE competition_id=? AND judge_id=? AND EXISTS(SELECT 1 FROM competitions WHERE id=assignments.competition_id AND published=0)",
         ).bind(c.id, judge.id),
         env.DB.prepare(
-          "DELETE FROM scores WHERE judge_id=? AND registration_id IN(SELECT id FROM registrations WHERE competition_id=?)",
+          "DELETE FROM scores WHERE judge_id=? AND registration_id IN(SELECT r.id FROM registrations r JOIN competitions c ON c.id=r.competition_id WHERE c.id=? AND c.published=0)",
         ).bind(judge.id, c.id),
       ]);
     } else
-      await env.DB.prepare("INSERT OR IGNORE INTO assignments VALUES(?,?)")
-        .bind(c.id, judge.id)
+      await env.DB.prepare(
+        "INSERT OR IGNORE INTO assignments SELECT ?,? WHERE EXISTS(SELECT 1 FROM competitions WHERE id=? AND published=0)",
+      )
+        .bind(c.id, judge.id, c.id)
         .run();
     return json({ ok: true });
   }
@@ -526,7 +668,7 @@ async function api(r, env) {
     if (!title || !description || !venue || !schedule)
       fail(400, "กรอกรายละเอียดให้ครบ");
     await env.DB.prepare(
-      "UPDATE competitions SET title=?,description=?,venue=?,schedule=?,registration_open=? WHERE id=?",
+      "UPDATE competitions SET title=?,description=?,venue=?,schedule=?,registration_open=? WHERE id=? AND published=0",
     )
       .bind(
         title,
@@ -560,11 +702,19 @@ async function api(r, env) {
       .bind(id)
       .first();
     if (incomplete.n) fail(409, "กรรมการยังให้คะแนนไม่ครบทุกทีม");
-    await env.DB.prepare(
-      "UPDATE competitions SET published=1,registration_open=0 WHERE id=?",
+    const published = await env.DB.prepare(
+      `UPDATE competitions SET published=1,registration_open=0
+      WHERE id=? AND published=0
+      AND EXISTS(SELECT 1 FROM assignments WHERE competition_id=competitions.id)
+      AND EXISTS(SELECT 1 FROM registrations WHERE competition_id=competitions.id AND status='submitted')
+      AND NOT EXISTS(SELECT 1 FROM registrations r JOIN assignments a ON a.competition_id=r.competition_id
+        LEFT JOIN scores s ON s.registration_id=r.id AND s.judge_id=a.judge_id
+        WHERE r.competition_id=competitions.id AND r.status='submitted' AND s.registration_id IS NULL)`,
     )
       .bind(id)
       .run();
+    if (!published.meta.changes)
+      fail(409, "ประกาศผลแล้ว หรือข้อมูลเปลี่ยน กรุณาตรวจสอบใหม่");
     return json({ message: "ประกาศผลแล้ว เปิดดาวน์โหลดประกาศนียบัตร" });
   }
   if (path.startsWith("/api/certificates/") && method === "GET") {
@@ -584,6 +734,7 @@ async function api(r, env) {
     return json({
       certificate: {
         ...result,
+        event_title: EVENT_TITLE,
         demo: env.DEMO_MODE !== "false",
         number: `HC-${id.slice(0, 8).toUpperCase()}`,
       },

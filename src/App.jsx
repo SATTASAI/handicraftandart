@@ -1,3 +1,4 @@
+import AdminOperations from "./components/AdminOperations";
 import { ApplicantTable } from "./components/ApplicantTable";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -1188,15 +1189,17 @@ function Judge({ notify }) {
 function Admin({ competitions, reload, notify }) {
   const [users, setUsers] = useState([]),
     [assignments, setAssignments] = useState([]),
+    [overview, setOverview] = useState(null),
     [error, setError] = useState(""),
-    [tab, setTab] = useState("users"),
+    [tab, setTab] = useState("operations"),
     [editing, setEditing] = useState(null),
     [busy, setBusy] = useState(false);
   const load = () =>
-    api("/admin/users")
-      .then((r) => {
+    Promise.all([api("/admin/users"), api("/admin/overview")])
+      .then(([r, operations]) => {
         setUsers(r.users);
         setAssignments(r.assignments);
+        setOverview(operations);
       })
       .catch((e) => setError(e.message));
   useEffect(() => {
@@ -1226,6 +1229,7 @@ function Admin({ competitions, reload, notify }) {
       </p>
       <div className="tabs">
         {[
+          ["operations", "ภาพรวม / ผู้สมัคร / ส่งประกาศนียบัตร"],
           ["users", "สิทธิ์ผู้ใช้งาน"],
           ["assignments", "มอบหมายกรรมการ"],
           ["competitions", "จัดการรายการ / ประกาศผล"],
@@ -1240,6 +1244,9 @@ function Admin({ competitions, reload, notify }) {
         ))}
       </div>
       <Message text={error} />
+      {tab === "operations" && (
+        <AdminOperations data={overview} refresh={load} notify={notify} />
+      )}
       {tab === "users" && (
         <>
           <p className="helper">
@@ -1692,7 +1699,7 @@ export function App() {
           </div>
         </div>
         <div className="event-brand">
-          <strong>ศิลปหัตถกรรม</strong>
+          <strong>ศิลปหัตถกรรม · ปีการศึกษา 2569</strong>
           <span>{BRAND}</span>
         </div>
         <div className="account-area">

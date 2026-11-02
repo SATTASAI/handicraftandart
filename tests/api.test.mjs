@@ -5,6 +5,9 @@ import { readFile } from "node:fs/promises";
 const origin = "https://example.test";
 test("real Workers/D1 flow: signup school, authorization, scores, publication, certificates, Resend reset and revocation", async (t) => {
   let emailPayload = null;
+  let mailFailure = false;
+  let mailCalls = 0;
+  const idempotencyKeys = [];
   const mf = new Miniflare(
     convertV4MiniflareOptions({
       modules: [
@@ -23,6 +26,9 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
       outboundService: async (request) => {
         assert.equal(new URL(request.url).hostname, "api.resend.com");
         emailPayload = await request.json();
+        mailCalls++;
+        idempotencyKeys.push(request.headers.get("Idempotency-Key"));
+        if (mailFailure) return new Response("Unavailable", { status: 503 });
         return new Response(JSON.stringify({ id: "mock-email-id" }), {
           status: 200,
         });
@@ -36,6 +42,7 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
     "0002_competitions.sql",
     "0003_work_link.sql",
     "0005_applicant_roles.sql",
+    "0006_certificate_deliveries.sql",
   ])
     for (const sql of (await readFile("migrations/" + name, "utf8"))
       .split(";")
@@ -270,11 +277,127 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
     (await call("/results", undefined, teacher.cookie)).body.results.length,
     0,
   );
+  const progress = await call("/admin/overview", undefined, admin.cookie);
+  assert.equal(progress.status, 200);
+  const painting = progress.body.competitions.find((c) => c.id === "painting");
+  assert.deepEqual(
+    [painting.teams, painting.judges, painting.scored],
+    [1, 1, 1],
+  );
+  assert.equal(progress.body.registrations[0].email, "teacher@example.test");
+  assert.equal(progress.body.readiness.email, true);
+  assert.equal(
+    (await call("/admin/overview", undefined, teacher.cookie)).status,
+    403,
+  );
+  assert.equal(
+    (
+      await call(
+        "/admin/certificate-email",
+        { registration_id: reg.body.id },
+        admin.cookie,
+      )
+    ).status,
+    409,
+  );
   assert.equal(
     (await call("/admin/publish", { competition_id: "painting" }, admin.cookie))
       .status,
     200,
   );
+  assert.equal(
+    (await call("/admin/publish", { competition_id: "painting" }, admin.cookie))
+      .status,
+    409,
+  );
+  assert.equal(
+    (
+      await call(
+        "/admin/certificate-email",
+        { registration_id: reg.body.id },
+        teacher.cookie,
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await call(
+        "/admin/certificate-email",
+        { registration_id: "missing" },
+        admin.cookie,
+      )
+    ).status,
+    404,
+  );
+  mailFailure = true;
+  assert.equal(
+    (
+      await call(
+        "/admin/certificate-email",
+        { registration_id: reg.body.id },
+        admin.cookie,
+      )
+    ).status,
+    502,
+  );
+  assert.equal(
+    (await db.prepare("SELECT status FROM certificate_deliveries").first())
+      .status,
+    "failed",
+  );
+  mailFailure = false;
+  const emails = await Promise.all(
+    [1, 2].map(() =>
+      call(
+        "/admin/certificate-email",
+        { registration_id: reg.body.id },
+        admin.cookie,
+      ),
+    ),
+  );
+  assert(emails.some((r) => r.status === 200));
+  assert(emails.every((r) => [200, 409].includes(r.status)));
+  assert.equal(mailCalls, 2); // one failed attempt, one accepted attempt, no duplicate concurrent send
+  assert.equal(idempotencyKeys[0], idempotencyKeys[1]);
+  assert.equal(emailPayload.to[0], "teacher@example.test");
+  assert.match(emailPayload.text, /https:\/\/example.test\/certificates/);
+  assert.match(emailPayload.text, /2569/);
+  assert.match(emailPayload.text, /ข้อมูลตัวอย่าง/);
+  assert.equal(
+    (
+      await call(
+        "/admin/certificate-email",
+        { registration_id: reg.body.id },
+        admin.cookie,
+      )
+    ).body.alreadySent,
+    true,
+  );
+  assert.equal(mailCalls, 2);
+  assert.equal(
+    (await call("/admin/overview", undefined, admin.cookie)).body
+      .registrations[0].email_status,
+    "sent",
+  );
+  await db
+    .prepare(
+      "UPDATE certificate_deliveries SET status='sending',updated_at=?,first_attempt_at=?",
+    )
+    .bind(1, 1)
+    .run();
+  assert.equal(
+    (
+      await call(
+        "/admin/certificate-email",
+        { registration_id: reg.body.id },
+        admin.cookie,
+      )
+    ).status,
+    409,
+  );
+  assert.equal(mailCalls, 2);
+  emailPayload = null;
   assert.equal(
     (await call("/results", undefined, teacher.cookie)).body.results[0].score,
     89,
