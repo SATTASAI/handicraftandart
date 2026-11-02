@@ -41,7 +41,7 @@ export async function buildCertificate(c, fontBytes) {
       });
     }
     centered("ประกาศนียบัตร", 475, 42, blue);
-    centered("ศิลปหัตถกรรม", 431, 23);
+    centered("งานศิลปหัตถกรรม ประจำปีการศึกษา 2569", 431, 23);
     centered("ศูนย์เครือข่ายสองพี่น้อง ห้วยแม่เพรียง ป่าเด็ง", 398, 20);
     centered("มอบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า", 345, 16);
     centered(person.name, 298, 29, blue);

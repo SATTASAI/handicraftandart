@@ -1,18 +1,11 @@
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { readFile, readdir } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
+import { localBindings } from "./local-config.mjs";
 export function devApi() {
   return {
     name: "local-cloudflare-api",
     async configureServer(server) {
-      let vars = {};
-      try {
-        for (const line of (await readFile(".dev.vars", "utf8")).split("\n")) {
-          const n = line.indexOf("=");
-          if (n > 0 && !line.startsWith("#"))
-            vars[line.slice(0, n).trim()] = line.slice(n + 1).trim();
-        }
-      } catch {}
+      const vars = await localBindings(".wrangler/vite-api");
       const mf = new Miniflare(
         convertV4MiniflareOptions({
           modules: [
@@ -21,12 +14,8 @@ export function devApi() {
           ],
           compatibilityDate: "2026-11-02",
           d1Databases: ["DB"],
-          d1Persist: ".wrangler/vite-api",
-          bindings: {
-            AUTH_SECRET: vars.AUTH_SECRET || randomBytes(32).toString("hex"),
-            DEMO_MODE: "true",
-            ...vars,
-          },
+          resourcePersistencePath: ".wrangler/vite-api",
+          bindings: vars,
         }),
       );
       const db = await mf.getD1Database("DB");

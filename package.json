@@ -13,7 +13,7 @@
     "db:local": "wrangler d1 migrations apply handicraftandart --local",
     "db:remote": "wrangler d1 migrations apply handicraftandart --remote",
     "deploy": "npm run build && wrangler deploy",
-    "test": "node --test tests/security.test.mjs tests/api.test.mjs tests/certificate.test.mjs tests/admin-setup.test.mjs",
+    "test": "node --test tests/security.test.mjs tests/api.test.mjs tests/certificate.test.mjs tests/admin-setup.test.mjs tests/criteria.test.mjs tests/local-runtime.test.mjs",
     "format": "prettier --write src server scripts tests vite.config.mjs wrangler.jsonc",
     "dev:api": "node scripts/local-api.mjs"
   },

@@ -1,15 +1,8 @@
 // Local development only. Deployments use server/index.js with Cloudflare bindings.
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { readFile, readdir } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
-let vars = {};
-try {
-  for (const line of (await readFile(".dev.vars", "utf8")).split("\n")) {
-    const n = line.indexOf("=");
-    if (n > 0 && !line.startsWith("#"))
-      vars[line.slice(0, n).trim()] = line.slice(n + 1).trim();
-  }
-} catch {}
+import { localBindings } from "./local-config.mjs";
+const vars = await localBindings(".wrangler/local-api");
 const mf = new Miniflare(
   convertV4MiniflareOptions({
     host: "127.0.0.1",
@@ -20,12 +13,8 @@ const mf = new Miniflare(
     ],
     compatibilityDate: "2026-11-02",
     d1Databases: ["DB"],
-    d1Persist: ".wrangler/local-api",
-    bindings: {
-      AUTH_SECRET: vars.AUTH_SECRET || randomBytes(32).toString("hex"),
-      DEMO_MODE: "true",
-      ...vars,
-    },
+    resourcePersistencePath: ".wrangler/local-api",
+    bindings: vars,
     serviceBindings: {
       ASSETS: () =>
         new Response("Use the Vite frontend at port 4173", { status: 404 }),
