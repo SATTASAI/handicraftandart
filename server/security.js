@@ -50,7 +50,14 @@ export async function verifyPassword(p, hash, secret) {
 }
 export const publicUser = (u) =>
   u
-    ? { id: u.id, email: u.email, name: u.name, school: u.school, role: u.role }
+    ? {
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        school: u.school,
+        role: u.role,
+        applicant_role: u.applicant_role ?? null,
+      }
     : null;
 export const medal = (s) =>
   s >= 80

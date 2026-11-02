@@ -106,13 +106,14 @@ async function api(r, env) {
   }
   if (path === "/api/health" && method === "GET") {
     await env.DB.prepare("SELECT 1 FROM competitions LIMIT 1").first();
+    await env.DB.prepare("SELECT applicant_role FROM users LIMIT 1").first();
     const setup = await env.DB.prepare(
       "SELECT 1 AS ready FROM system_setup s JOIN users u ON u.id = s.user_id WHERE s.key = 'initial_admin' AND u.role = 'admin' LIMIT 1",
     ).first();
     return json({
       ok: true,
       adminSetupComplete: Boolean(setup),
-      release: "admin-setup-2026-11-02",
+      release: "applicant-roles-2026-11-02",
     });
   }
   if (path === "/api/competitions" && method === "GET")
@@ -135,7 +136,8 @@ async function api(r, env) {
     const b = await body(r),
       email = emailOf(b.email),
       name = safeText(b.name, 100),
-      school = safeText(b.school, 150);
+      school = safeText(b.school, 150),
+      applicantRole = b.applicant_role;
     if (
       !validEmail(email) ||
       name.length < 2 ||
@@ -143,13 +145,15 @@ async function api(r, env) {
       !validPassword(b.password)
     )
       fail(400, "กรอกชื่อ โรงเรียน อีเมลให้ครบ และใช้รหัสผ่าน 12–128 ตัวอักษร");
+    if (!["judge", "coach"].includes(applicantRole))
+      fail(400, "กรุณาเลือกสมัครเป็นกรรมการหรือผู้ฝึกซ้อมอย่างใดอย่างหนึ่ง");
     const id = crypto.randomUUID(),
       hash = await passwordHash(b.password, env.AUTH_SECRET);
     try {
       await env.DB.prepare(
-        "INSERT INTO users(id,email,name,school,password_hash,created_at) VALUES(?,?,?,?,?,?)",
+        "INSERT INTO users(id,email,name,school,password_hash,applicant_role,created_at) VALUES(?,?,?,?,?,?,?)",
       )
-        .bind(id, email, name, school, hash, now())
+        .bind(id, email, name, school, hash, applicantRole, now())
         .run();
     } catch (e) {
       if (String(e).includes("UNIQUE"))
@@ -164,7 +168,16 @@ async function api(r, env) {
       .bind(await digest(token), id, now() + 604800)
       .run();
     return json(
-      { user: { id, email, name, school, role: "participant" } },
+      {
+        user: publicUser({
+          id,
+          email,
+          name,
+          school,
+          applicant_role: applicantRole,
+          role: "participant",
+        }),
+      },
       201,
       { "Set-Cookie": cookie(token, r) },
     );
@@ -435,7 +448,7 @@ async function api(r, env) {
     return json({
       users: (
         await env.DB.prepare(
-          "SELECT id,email,name,school,role FROM users ORDER BY created_at DESC",
+          "SELECT id,email,name,school,applicant_role,role,created_at FROM users ORDER BY created_at DESC",
         ).all()
       ).results,
       assignments: (await env.DB.prepare("SELECT * FROM assignments").all())

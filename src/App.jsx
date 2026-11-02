@@ -1,3 +1,4 @@
+import { ApplicantTable } from "./components/ApplicantTable";
 import React, { useEffect, useRef, useState } from "react";
 import {
   House,
@@ -86,16 +87,11 @@ function Field({ label, children }) {
     </label>
   );
 }
-function AuthDialog({ mode, setMode, onClose, onUser }) {
-  const ref = useRef();
+function AuthPage({ mode, setMode, onClose, onUser }) {
   const [error, setError] = useState(""),
     [success, setSuccess] = useState(""),
     [busy, setBusy] = useState(false),
     [visible, setVisible] = useState(false);
-  useEffect(() => {
-    ref.current.showModal();
-    return () => ref.current?.close();
-  }, []);
   useEffect(() => {
     setError("");
     setSuccess("");
@@ -124,22 +120,35 @@ function AuthDialog({ mode, setMode, onClose, onUser }) {
     }
   }
   return (
-    <dialog
-      ref={ref}
-      className="auth-dialog"
-      onCancel={onClose}
-      onClick={(e) => {
-        if (e.target === ref.current) onClose();
-      }}
-    >
-      <div className="dialog-inner">
-        <button
-          className="icon-button dialog-close"
-          aria-label="ปิด"
-          onClick={onClose}
+    <section className="auth-page" aria-label="บัญชีผู้ใช้งาน">
+      <div className="auth-intro">
+        <span className="badge blue">ศิลปหัตถกรรมนักเรียน</span>
+        <h1>
+          ทุกความสามารถ
+          <br />
+          เริ่มต้นที่นี่
+        </h1>
+        <p>
+          ร่วมสร้างเวทีแห่งการเรียนรู้และความคิดสร้างสรรค์
+          <br />
+          สำหรับนักเรียน ครูผู้ฝึกซ้อม และกรรมการ
+        </p>
+        <div className="auth-intro-brand">
+          <Buildings size={28} />
+          <span>{BRAND}</span>
+        </div>
+        <a
+          href="/"
+          onClick={(e) => {
+            e.preventDefault();
+            go("/");
+          }}
         >
-          <X size={22} />
-        </button>
+          <ArrowLeft size={18} />
+          กลับหน้าแรก
+        </a>
+      </div>
+      <div className="auth-card dialog-inner">
         <div className="auth-mark">
           <LockKey size={27} />
         </div>
@@ -152,7 +161,7 @@ function AuthDialog({ mode, setMode, onClose, onUser }) {
         </h2>
         <p className="muted">
           {mode === "register"
-            ? "สำหรับครูผู้ประสานงานของโรงเรียนที่เข้าร่วม"
+            ? "สำหรับกรรมการและผู้ฝึกซ้อมของโรงเรียนที่เข้าร่วม"
             : mode === "forgot"
               ? "เราจะส่งลิงก์เปลี่ยนรหัสผ่านไปยังอีเมลที่สมัครไว้"
               : "เข้าสู่ระบบจัดการการแข่งขันศิลปหัตถกรรม"}
@@ -162,7 +171,7 @@ function AuthDialog({ mode, setMode, onClose, onUser }) {
         <form onSubmit={submit}>
           {mode === "register" && (
             <>
-              <Field label="ชื่อ–นามสกุลครู">
+              <Field label="ชื่อ–นามสกุล">
                 <input
                   name="name"
                   required
@@ -171,6 +180,18 @@ function AuthDialog({ mode, setMode, onClose, onUser }) {
                   autoComplete="name"
                   placeholder="ระบุชื่อ–นามสกุล"
                 />
+              </Field>
+              <Field label="สมัครเป็น">
+                <select name="applicant_role" required defaultValue="">
+                  <option value="" disabled>
+                    เลือกบทบาท
+                  </option>
+                  <option value="judge">กรรมการ</option>
+                  <option value="coach">ผู้ฝึกซ้อม</option>
+                </select>
+                <small>
+                  สิทธิ์กรรมการจะเปิดใช้งานเมื่อผู้ดูแลกำหนดสิทธิ์ให้
+                </small>
               </Field>
               <Field label="โรงเรียนที่สังกัด">
                 <input
@@ -275,7 +296,7 @@ function AuthDialog({ mode, setMode, onClose, onUser }) {
           )}
         </div>
       </div>
-    </dialog>
+    </section>
   );
 }
 function ResetPassword({ openLogin }) {
@@ -1228,46 +1249,23 @@ function Admin({ competitions, reload, notify }) {
       </div>
       <Message text={error} />
       {tab === "users" && (
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>ชื่อ / อีเมล</th>
-                <th>โรงเรียน</th>
-                <th>สิทธิ์</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.id}>
-                  <td>
-                    <strong>{u.name}</strong>
-                    <small>{u.email}</small>
-                  </td>
-                  <td>{u.school}</td>
-                  <td>
-                    <select
-                      aria-label={"สิทธิ์ของ " + u.name}
-                      value={u.role}
-                      disabled={busy}
-                      onChange={(e) =>
-                        action(
-                          "/admin/role",
-                          { user_id: u.id, role: e.target.value },
-                          "เปลี่ยนสิทธิ์แล้ว",
-                        )
-                      }
-                    >
-                      <option value="participant">ผู้เข้าร่วม</option>
-                      <option value="judge">กรรมการ</option>
-                      <option value="admin">ผู้ดูแล</option>
-                    </select>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <p className="helper">
+            บทบาทที่สมัครแสดงตามข้อมูลผู้สมัคร
+            ผู้ดูแลเป็นผู้กำหนดสิทธิ์ใช้งานจริง
+          </p>
+          <ApplicantTable
+            users={users}
+            busy={busy}
+            onRoleChange={(userId, role) =>
+              action(
+                "/admin/role",
+                { user_id: userId, role },
+                "เปลี่ยนสิทธิ์แล้ว",
+              )
+            }
+          />
+        </>
       )}
       {tab === "assignments" && (
         <>
@@ -1492,7 +1490,6 @@ export function App() {
     [competitions, setCompetitions] = useState([]),
     [user, setUser] = useState(null),
     [authReady, setAuthReady] = useState(false),
-    [authMode, setAuthMode] = useState(null),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [demo, setDemo] = useState(false),
@@ -1503,6 +1500,21 @@ export function App() {
     [dataError, setDataError] = useState(""),
     [results, setResults] = useState([]);
   const toastTimer = useRef();
+  const authReturn = useRef("/registrations");
+  const authMode = {
+    "/login": "login",
+    "/signup": "register",
+    "/forgot-password": "forgot",
+  }[path];
+  function setAuthMode(mode) {
+    if (!authMode && path !== "/reset-password")
+      authReturn.current = protectedPage ? path : "/registrations";
+    go(
+      { login: "/login", register: "/signup", forgot: "/forgot-password" }[
+        mode
+      ],
+    );
+  }
   function notify(text, error = false) {
     setToast({ text, error });
     clearTimeout(toastTimer.current);
@@ -1563,7 +1575,8 @@ export function App() {
   }, [path]);
   function register(c) {
     if (!user) {
-      setAuthMode("login");
+      authReturn.current = "/register/" + c.id;
+      go("/login");
       return;
     }
     go("/register/" + c.id);
@@ -1574,7 +1587,17 @@ export function App() {
   const eventId = path.split("/")[2],
     c = competitions.find((x) => x.id === eventId);
   let content;
-  if (path === "/reset-password")
+  if (authMode)
+    content = (
+      <AuthPage
+        key={authMode}
+        mode={authMode}
+        setMode={setAuthMode}
+        onClose={() => go(authReturn.current)}
+        onUser={setUser}
+      />
+    );
+  else if (path === "/reset-password")
     content = <ResetPassword openLogin={() => setAuthMode("login")} />;
   else if (protectedPage && !authReady) content = <p>กำลังตรวจสอบบัญชี…</p>;
   else if (protectedPage && !user)
@@ -1801,7 +1824,7 @@ export function App() {
         </div>
       </aside>
       <main id="main" className="main">
-        {demo && (
+        {demo && !authMode && (
           <div className="demo-note">
             <span className="badge blue">ข้อมูลตัวอย่าง</span>
             <span>เกณฑ์และกำหนดการแข่งขันรอผู้จัดยืนยัน</span>
@@ -1810,14 +1833,6 @@ export function App() {
         {content}
         <footer className="page-footer">ศิลปหัตถกรรม · {BRAND}</footer>
       </main>
-      {authMode && (
-        <AuthDialog
-          mode={authMode}
-          setMode={setAuthMode}
-          onClose={() => setAuthMode(null)}
-          onUser={setUser}
-        />
-      )}{" "}
       {toast && (
         <div className={"toast " + (toast.error ? "error" : "")} role="status">
           {toast.error ? (

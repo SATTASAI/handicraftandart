@@ -15,3 +15,4 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Home is a six-cover competition grid. Card opens details/criteria/schedule/venue and a registration button.
 - Target hosting is Cloudflare Workers + D1; password reset provider is Resend. School is required on teacher registration and persisted server-side.
 - Keep synthetic local accounts and deployment secrets out of git. New accounts must never become administrators automatically.
+- Authentication uses full pages at /login, /signup, and /forgot-password in the accepted blue/white layout. Signup collects exactly one requested role (judge or coach); admins assign actual permissions separately. Admin user lists show applicant details.

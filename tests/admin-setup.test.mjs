@@ -71,11 +71,13 @@ test("authorized migration promotes only the existing target and health verifies
     .run();
   await migration(db, "0004_initial_admin.sql");
   await migration(db, "0004_initial_admin.sql");
+  await migration(db, "0005_applicant_roles.sql");
   const owner = await db
     .prepare("SELECT * FROM users WHERE id=?")
     .bind("owner")
     .first();
   assert.equal(owner.role, "admin");
+  assert.equal(owner.applicant_role, null);
   assert.equal(owner.password_hash, "unchanged-hash");
   assert.equal(owner.school, "โรงเรียนทดสอบ");
   assert.equal(
@@ -106,6 +108,7 @@ test("authorized migration promotes only the existing target and health verifies
 test("missing target is not fabricated and subsequent registration never gains automatic admin privileges", async (t) => {
   const { mf, db } = await localRuntime(t);
   await migration(db, "0004_initial_admin.sql");
+  await migration(db, "0005_applicant_roles.sql");
   assert.equal(
     (await (await mf.dispatchFetch("https://example.test/api/health")).json())
       .adminSetupComplete,
@@ -121,6 +124,7 @@ test("missing target is not fabricated and subsequent registration never gains a
       },
       body: JSON.stringify({
         email: "sattawat.imc@gmail.com",
+        applicant_role: "coach",
         name: "ครูทดสอบ",
         school: "โรงเรียนทดสอบ",
         password: "local-test-passphrase-only",

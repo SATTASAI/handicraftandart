@@ -1394,3 +1394,84 @@ td select {
     top: 12px;
   }
 }
+
+.auth-page {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(320px, 440px);
+  gap: clamp(28px, 5vw, 76px);
+  align-items: center;
+  max-width: 1040px;
+  margin: 40px auto;
+}
+.auth-intro h1 {
+  font-size: clamp(30px, 3vw, 44px);
+  line-height: 1.5;
+  margin: 22px 0 16px;
+  letter-spacing: -0.6px;
+}
+.auth-intro p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 2;
+}
+.auth-intro-brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  color: var(--blue);
+  margin: 30px 0;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.auth-intro-brand svg {
+  flex-shrink: 0;
+}
+.auth-intro a {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+.auth-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 40px #12305308;
+}
+.auth-card h2 {
+  font-size: 26px;
+  margin: 0 0 6px;
+}
+.auth-card p {
+  font-size: 13px;
+  line-height: 1.8;
+}
+.auth-card form {
+  margin-top: 24px;
+}
+@media (max-width: 900px) {
+  .auth-page {
+    grid-template-columns: 1fr;
+    max-width: 480px;
+    gap: 24px;
+    margin: 12px auto;
+  }
+  .auth-intro h1 {
+    font-size: 28px;
+    margin: 12px 0;
+  }
+  .auth-intro h1 br {
+    display: none;
+  }
+  .auth-intro p,
+  .auth-intro-brand {
+    display: none;
+  }
+  .auth-intro a {
+    margin-top: 4px;
+  }
+  .auth-card {
+    padding: 24px;
+  }
+}

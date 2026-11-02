@@ -35,6 +35,7 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
     "0001_initial.sql",
     "0002_competitions.sql",
     "0003_work_link.sql",
+    "0005_applicant_roles.sql",
   ])
     for (const sql of (await readFile("migrations/" + name, "utf8"))
       .split(";")
@@ -73,8 +74,20 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
     ).status,
     400,
   );
+  for (const applicant_role of [undefined, "admin", ["judge", "coach"]]) {
+    const invalid = await call("/auth/register", {
+      email: "invalid-role@example.test",
+      name: "ครูทดสอบ",
+      school: "โรงเรียนทดสอบ",
+      password: "valid-test-passphrase",
+      applicant_role,
+    });
+    assert.equal(invalid.status, 400);
+  }
   const teacher = await call("/auth/register", {
     email: "teacher@example.test",
+    applicant_role: "coach",
+    role: "admin",
     name: "ครูตัวอย่าง",
     school: "โรงเรียนทดสอบ",
     password: "teacher-passphrase-123",
@@ -82,6 +95,16 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
   assert.equal(teacher.status, 201);
   assert.equal(teacher.body.user.school, "โรงเรียนทดสอบ");
   assert.equal(teacher.body.user.role, "participant");
+  assert.equal(teacher.body.user.applicant_role, "coach");
+  assert.equal(
+    (
+      await db
+        .prepare("SELECT applicant_role FROM users WHERE id=?")
+        .bind(teacher.body.user.id)
+        .first()
+    ).applicant_role,
+    "coach",
+  );
   assert(teacher.cookie);
   assert.equal(
     (await call("/auth/me", undefined, teacher.cookie)).body.user.school,
@@ -137,20 +160,35 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
   );
   const judge = await call("/auth/register", {
     email: "judge@example.test",
+    applicant_role: "judge",
+    role: "judge",
     name: "กรรมการทดสอบ",
     school: "โรงเรียนกรรมการ",
     password: "judge-passphrase-123",
   });
   const admin = await call("/auth/register", {
     email: "admin@example.test",
+    applicant_role: "coach",
     name: "ผู้จัดทดสอบ",
     school: "โรงเรียนผู้จัด",
     password: "admin-passphrase-123",
   });
+  assert.equal(judge.body.user.applicant_role, "judge");
+  assert.equal(judge.body.user.role, "participant");
   await db
     .prepare("UPDATE users SET role='admin' WHERE id=?")
     .bind(admin.body.user.id)
     .run();
+  const applicantList = await call("/admin/users", undefined, admin.cookie);
+  assert.equal(applicantList.status, 200);
+  const applicant = applicantList.body.users.find(
+    (u) => u.id === judge.body.user.id,
+  );
+  assert.equal(applicant.applicant_role, "judge");
+  assert.equal(applicant.school, "โรงเรียนกรรมการ");
+  assert.equal(applicant.email, "judge@example.test");
+  assert.equal(typeof applicant.created_at, "number");
+  assert(!("password_hash" in applicant));
   assert.equal(
     (
       await call(
