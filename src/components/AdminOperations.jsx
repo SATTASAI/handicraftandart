@@ -216,6 +216,20 @@ export default function AdminOperations({ data, refresh, notify }) {
                     {r.school}
                   </td>
                   <td>
+                    {r.students
+                      .concat(r.coaches)
+                      .filter((p) => p.evidence_id)
+                      .map((p, i) => (
+                        <div key={i}>
+                          <a
+                            href={"/api/documents/" + p.evidence_id}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            ตรวจภาพบัตร: {p.name}
+                          </a>
+                        </div>
+                      ))}
                     นักเรียน:{" "}
                     {r.students
                       .map(
