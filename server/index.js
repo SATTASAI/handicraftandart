@@ -104,6 +104,17 @@ async function api(r, env) {
     if (!origin || origin !== url.origin)
       fail(403, "คำขอไม่ได้มาจากเว็บไซต์นี้");
   }
+  if (path === "/api/health" && method === "GET") {
+    await env.DB.prepare("SELECT 1 FROM competitions LIMIT 1").first();
+    const setup = await env.DB.prepare(
+      "SELECT 1 AS ready FROM system_setup s JOIN users u ON u.id = s.user_id WHERE s.key = 'initial_admin' AND u.role = 'admin' LIMIT 1",
+    ).first();
+    return json({
+      ok: true,
+      adminSetupComplete: Boolean(setup),
+      release: "admin-setup-2026-11-02",
+    });
+  }
   if (path === "/api/competitions" && method === "GET")
     return json({
       competitions: (
