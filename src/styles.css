@@ -1559,3 +1559,18 @@ td select {
   flex: 0 0 auto;
   white-space: nowrap;
 }
+
+.identity-upload {
+  grid-column: 2 / -1;
+  min-width: 0;
+  padding: 10px 0;
+}
+.identity-upload small {
+  display: block;
+  color: var(--muted);
+  margin: 6px 0;
+}
+.identity-upload a {
+  color: var(--blue);
+  text-decoration: underline;
+}

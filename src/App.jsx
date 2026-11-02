@@ -1,3 +1,7 @@
+import IdentityUpload, { uploadIdentity } from "./components/IdentityUpload";
+import AccountVerification from "./components/AccountVerification";
+import EventWindow from "./components/EventWindow";
+import JudgeHome from "./components/JudgeHome";
 import CompetitionPolicy from "./components/CompetitionPolicy";
 import ruleSources from "./rules-sources.json";
 import AdminOperations from "./components/AdminOperations";
@@ -47,6 +51,7 @@ const nav = [
   ["/", "หน้าแรก", House],
   ["/competitions", "รายการแข่งขัน", Trophy],
   ["/registrations", "ลงทะเบียน", ClipboardText],
+  ["/account", "ยืนยันบัญชี / หลักฐาน", UserCircle],
   ["/results", "ผลการแข่งขัน", ChartBar],
   ["/certificates", "ประกาศนียบัตร", Certificate],
 ];
@@ -105,6 +110,8 @@ function AuthPage({ mode, setMode, onClose, onUser }) {
     setSuccess("");
     setBusy(true);
     const data = Object.fromEntries(new FormData(e.currentTarget));
+    const identityFile = data.identity_file;
+    delete data.identity_file;
     try {
       if (mode === "register" && data.password !== data.confirm)
         throw new Error("รหัสผ่านทั้งสองช่องไม่ตรงกัน");
@@ -113,6 +120,16 @@ function AuthPage({ mode, setMode, onClose, onUser }) {
         data,
       );
       if (result.user) {
+        if (mode === "register") {
+          try {
+            await uploadIdentity(identityFile, "account");
+            result.user = (await api("/auth/me")).user;
+          } catch {
+            onUser(result.user);
+            onClose();
+            return;
+          }
+        }
         onUser(result.user);
         onClose();
       } else setSuccess(result.message);
@@ -182,7 +199,7 @@ function AuthPage({ mode, setMode, onClose, onUser }) {
                     เลือกบทบาท
                   </option>
                   <option value="judge">กรรมการ</option>
-                  <option value="coach">ผู้ฝึกซ้อม</option>
+                  <option value="coach">บัญชีโรงเรียน / ผู้ฝึกซ้อม</option>
                 </select>
                 <small>
                   สิทธิ์กรรมการจะเปิดใช้งานเมื่อผู้ดูแลกำหนดสิทธิ์ให้
@@ -199,6 +216,19 @@ function AuthPage({ mode, setMode, onClose, onUser }) {
                 <small>ใช้ระบุโรงเรียนในรายการสมัครแข่งขันของคุณ</small>
               </Field>
             </>
+          )}
+          {mode === "register" && (
+            <Field label="ภาพถ่ายบัตรประชาชนของผู้สมัครบัญชี">
+              <input
+                name="identity_file"
+                type="file"
+                accept="image/jpeg,image/png"
+                required
+              />
+              <small>
+                ใช้ตรวจยืนยันบัญชีโดยแอดมินเท่านั้น ภาพจะไม่เปิดสาธารณะ
+              </small>
+            </Field>
           )}
           <Field label="อีเมล">
             <input
@@ -513,7 +543,10 @@ function Directory({ competitions, loading, error }) {
                   </h2>
                   <span
                     className={
-                      "badge " + (c.registration_open ? "green" : "gray")
+                      "badge " +
+                      ((c.can_register ?? c.registration_open)
+                        ? "green"
+                        : "gray")
                     }
                   >
                     {c.published
@@ -646,7 +679,12 @@ function CompetitionDetail({ c, onRegister }) {
           </div>
         </div>
         <aside className="detail-aside">
-          <span className={"badge " + (c.registration_open ? "green" : "gray")}>
+          <span
+            className={
+              "badge " +
+              ((c.can_register ?? c.registration_open) ? "green" : "gray")
+            }
+          >
             {c.published
               ? "ประกาศผลแล้ว"
               : c.registration_open
@@ -670,7 +708,7 @@ function CompetitionDetail({ c, onRegister }) {
           </div>
           <Button
             variant="primary full"
-            disabled={!c.registration_open || c.published}
+            disabled={!(c.can_register ?? c.registration_open) || c.published}
             onClick={() => onRegister(c)}
           >
             ลงทะเบียนแข่งขัน <ArrowRight size={19} />
@@ -754,6 +792,9 @@ function RegistrationForm({ c, user, onSaved, existing }) {
             </div>
           </div>
           <Message text={error} />
+          <Field label="โรงเรียนที่ส่งเข้าแข่งขัน">
+            <input readOnly value={user.school} />
+          </Field>
           {c.policy?.eligibility_confirmation && (
             <label className="checkbox">
               <input
@@ -873,6 +914,20 @@ function RegistrationForm({ c, user, onSaved, existing }) {
                   </select>
                 </Field>
               )}
+              {c.workflow_version === 1 && (
+                <IdentityUpload
+                  label={"ภาพบัตรผู้แข่งขัน " + (i + 1)}
+                  value={s.evidence_id}
+                  disabled={review}
+                  onChange={(id) =>
+                    setStudents((previous) =>
+                      previous.map((x, j) =>
+                        i === j ? { ...x, evidence_id: id } : x,
+                      ),
+                    )
+                  }
+                />
+              )}
               {!review && (
                 <button
                   type="button"
@@ -914,12 +969,28 @@ function RegistrationForm({ c, user, onSaved, existing }) {
                   onChange={(e) =>
                     setCoaches(
                       coaches.map((x, j) =>
-                        j === i ? { name: e.target.value } : x,
+                        j === i ? { ...x, name: e.target.value } : x,
                       ),
                     )
                   }
                 />
               </Field>
+              {c.workflow_version === 1 && (
+                <IdentityUpload
+                  purpose="coach"
+                  label={"ภาพบัตรครูผู้ฝึกซ้อม " + (i + 1)}
+                  value={s.evidence_id}
+                  disabled={review}
+                  accountEvidence={user.identity_document_id}
+                  onChange={(id) =>
+                    setCoaches((previous) =>
+                      previous.map((x, j) =>
+                        i === j ? { ...x, evidence_id: id } : x,
+                      ),
+                    )
+                  }
+                />
+              )}
               {!review && (
                 <button
                   type="button"
@@ -1003,7 +1074,7 @@ function RegistrationForm({ c, user, onSaved, existing }) {
     </>
   );
 }
-function Registrations({ rows, loading, error }) {
+function Registrations({ rows, loading, error, competitions }) {
   return (
     <>
       <div className="page-heading">
@@ -1055,7 +1126,9 @@ function Registrations({ rows, loading, error }) {
                     </span>
                   </td>
                   <td>
-                    {r.status === "draft" ? (
+                    {!r.published &&
+                    competitions.find((c) => c.id === r.competition_id)
+                      ?.can_edit ? (
                       <button
                         className="text-button"
                         onClick={() => go("/register/" + r.competition_id)}
@@ -1115,6 +1188,7 @@ function Results({ rows, competitions }) {
               <tr>
                 <th>รายการ / โรงเรียน</th>
                 <th>ผู้เข้าแข่งขัน</th>
+                <th>อันดับ</th>
                 <th>คะแนน</th>
                 <th>ผลรางวัล</th>
                 <th>ผลงาน</th>
@@ -1132,12 +1206,21 @@ function Results({ rows, competitions }) {
                       <div key={s.name}>{s.name}</div>
                     ))}
                   </td>
+                  <td>{r.rank || "—"}</td>
                   <td>
                     <strong className="score">
-                      {Number(r.score).toFixed(2)}
+                      {r.score === null ? "—" : Number(r.score).toFixed(2)}
                     </strong>
                   </td>
-                  <td>{r.medal}</td>
+                  <td>
+                    {r.award && (
+                      <strong>
+                        {r.award}
+                        <br />
+                      </strong>
+                    )}
+                    {r.medal}
+                  </td>
                   <td>
                     {r.work_url ? (
                       <a
@@ -1217,7 +1300,11 @@ function Certificates({ rows, notify }) {
                   </td>
                   <td>
                     <Button
-                      disabled={!r.published || busy === r.id}
+                      disabled={
+                        !r.published ||
+                        r.decision === "disqualified" ||
+                        busy === r.id
+                      }
                       onClick={() => download(r)}
                     >
                       <DownloadSimple size={18} />
@@ -1234,6 +1321,7 @@ function Certificates({ rows, notify }) {
   );
 }
 function Judge({ notify }) {
+  const competitionId = new URLSearchParams(location.search).get("competition");
   const [rows, setRows] = useState([]),
     [error, setError] = useState(""),
     [selected, setSelected] = useState(null),
@@ -1244,7 +1332,13 @@ function Judge({ notify }) {
     [busy, setBusy] = useState(false);
   const load = () =>
     api("/judge/registrations")
-      .then((r) => setRows(r.registrations))
+      .then((r) =>
+        setRows(
+          r.registrations.filter(
+            (x) => !competitionId || x.competition_id === competitionId,
+          ),
+        ),
+      )
       .catch((e) => setError(e.message));
   useEffect(() => {
     load();
@@ -1257,7 +1351,7 @@ function Judge({ notify }) {
     setDeductionReason(r.deduction_reason || "");
     setError("");
   }
-  async function save(e) {
+  async function save(e, finalize = false) {
     e.preventDefault();
     setBusy(true);
     try {
@@ -1265,10 +1359,15 @@ function Judge({ notify }) {
         registration_id: selected.id,
         criteria: values.map(Number),
         comment,
+        finalize,
         deduction: Number(deduction),
         deduction_reason: deductionReason,
       });
-      notify("บันทึกคะแนนแล้ว");
+      notify(
+        finalize
+          ? "ยืนยันคะแนนแล้ว ไม่สามารถแก้ไขได้อีก"
+          : "บันทึกคะแนนร่างแล้ว",
+      );
       setSelected(null);
       load();
     } catch (e) {
@@ -1321,9 +1420,15 @@ function Judge({ notify }) {
                       </a>
                     )}
                   </td>
-                  <td>{r.total ?? "ยังไม่ให้คะแนน"}</td>
                   <td>
-                    <Button disabled={r.published} onClick={() => select(r)}>
+                    {r.total ?? "ยังไม่ให้คะแนน"}
+                    {r.finalized_at ? " · ยืนยันแล้ว" : " · ร่าง"}
+                  </td>
+                  <td>
+                    <Button
+                      disabled={r.published || !!r.finalized_at}
+                      onClick={() => select(r)}
+                    >
                       {r.published
                         ? "ประกาศผลแล้ว"
                         : r.total !== null
@@ -1420,7 +1525,23 @@ function Judge({ notify }) {
                 ยกเลิก
               </Button>
               <Button variant="primary" disabled={busy}>
-                บันทึกคะแนน
+                บันทึกคะแนนร่าง
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={busy}
+                onClick={(e) => {
+                  if (
+                    e.currentTarget.form.reportValidity() &&
+                    confirm(
+                      "โปรดตรวจสอบคะแนนและเกณฑ์การตัดสินให้ครบถ้วน เมื่อยืนยันแล้ว คะแนนของท่านจะถูกบันทึกเป็นผลตัดสินขั้นสุดท้ายและไม่สามารถแก้ไขได้อีก ท่านยืนยันว่าคะแนนถูกต้องครบถ้วนแล้วหรือไม่?",
+                    )
+                  )
+                    save(e, true);
+                }}
+              >
+                ยืนยันผลการลงคะแนน
               </Button>
             </div>
           </form>
@@ -1433,6 +1554,7 @@ function Admin({ competitions, reload, notify }) {
   const [users, setUsers] = useState([]),
     [assignments, setAssignments] = useState([]),
     [overview, setOverview] = useState(null),
+    [candidateIds, setCandidateIds] = useState(null),
     [error, setError] = useState(""),
     [tab, setTab] = useState("operations"),
     [editing, setEditing] = useState(null),
@@ -1487,6 +1609,7 @@ function Admin({ competitions, reload, notify }) {
         ))}
       </div>
       <Message text={error} />
+      {tab === "operations" && <EventWindow />}
       {tab === "operations" && (
         <AdminOperations data={overview} refresh={load} notify={notify} />
       )}
@@ -1499,6 +1622,13 @@ function Admin({ competitions, reload, notify }) {
           <ApplicantTable
             users={users}
             busy={busy}
+            onApprove={(userId, status, note) =>
+              action(
+                "/admin/approve-user",
+                { user_id: userId, status, note },
+                "บันทึกผลตรวจบัญชีแล้ว",
+              )
+            }
             onRoleChange={(userId, role) =>
               action(
                 "/admin/role",
@@ -1523,7 +1653,22 @@ function Admin({ competitions, reload, notify }) {
             }}
           >
             <Field label="รายการแข่งขัน">
-              <select required name="competition_id">
+              <select
+                required
+                name="competition_id"
+                onChange={async (e) => {
+                  setCandidateIds([]);
+                  try {
+                    const r = await api(
+                      "/admin/judge-candidates?competition=" +
+                        encodeURIComponent(e.target.value),
+                    );
+                    setCandidateIds(r.candidates.map((j) => j.id));
+                  } catch (e) {
+                    setError(e.message);
+                  }
+                }}
+              >
                 <option value="">เลือกรายการ</option>
                 {competitions
                   .filter((c) => !c.published)
@@ -1538,7 +1683,12 @@ function Admin({ competitions, reload, notify }) {
               <select required name="judge_id">
                 <option value="">เลือกกรรมการ</option>
                 {users
-                  .filter((u) => ["judge", "admin"].includes(u.role))
+                  .filter(
+                    (u) =>
+                      ["judge", "admin"].includes(u.role) &&
+                      u.approval_status === "approved" &&
+                      (candidateIds === null || candidateIds.includes(u.id)),
+                  )
                   .map((u) => (
                     <option value={u.id} key={u.id}>
                       {u.name} · {u.school}
@@ -1548,6 +1698,23 @@ function Admin({ competitions, reload, notify }) {
             </Field>
             <Button disabled={busy} variant="primary">
               มอบหมาย
+            </Button>
+            <Button
+              type="button"
+              disabled={busy}
+              onClick={(e) => {
+                const id = new FormData(e.currentTarget.form).get(
+                  "competition_id",
+                );
+                if (id)
+                  action(
+                    "/admin/auto-assign",
+                    { competition_id: id },
+                    "ระบบคัดเลือกกรรมการที่ไม่มีโรงเรียนตนเองและมอบหมายแล้ว",
+                  );
+              }}
+            >
+              คัดเลือกและมอบหมายอัตโนมัติ
             </Button>
           </form>
           <div className="table-scroll">
@@ -1991,10 +2158,18 @@ export function App() {
   else if (path === "/reset-password")
     content = <ResetPassword openLogin={() => setAuthMode("login")} />;
   else if (!user) content = null;
+  else if (
+    path === "/account" ||
+    (user.role !== "admin" && user.approval_status !== "approved")
+  )
+    content = <AccountVerification user={user} onUser={setUser} />;
+  else if (path === "/" && user.role === "judge")
+    content = <JudgeHome navigate={go} />;
   else if (path === "/registrations")
     content = (
       <Registrations
         rows={registrations}
+        competitions={competitions}
         loading={dataLoading}
         error={dataError}
       />

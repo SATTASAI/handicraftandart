@@ -53,9 +53,16 @@ export async function buildCertificate(c, fontBytes) {
       223,
       17,
     );
-    centered(c.medal, 187, 24);
+    centered((c.award ? c.award + " · " : "") + c.medal, 187, 24);
     centered(c.title + " " + c.grade, 151, 18);
-    centered("คะแนน " + Number(c.score).toFixed(2) + " / 100", 116, 16);
+    centered(
+      (c.rank ? "ลำดับที่ " + c.rank + " · " : "") +
+        "คะแนน " +
+        Number(c.score).toFixed(2) +
+        " / 100",
+      116,
+      16,
+    );
     page.drawText(c.number + "-" + (i + 1), {
       x: 58,
       y: 59,

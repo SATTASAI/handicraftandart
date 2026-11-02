@@ -130,6 +130,8 @@ test("primary trial: eligibility, school conflicts, full panels, deductions, nor
     ).school_key,
     "โรงเรียนเดิม",
   );
+  // This fixture verifies compatibility for pre-finalization trial competitions; v1 workflow is exercised separately.
+  await db.prepare("UPDATE competitions SET workflow_version=0").run();
   async function account(id, role, school) {
     const token = "test-session-" + id;
     await db
@@ -150,6 +152,10 @@ test("primary trial: eligibility, school conflicts, full panels, deductions, nor
     await db
       .prepare("INSERT INTO sessions VALUES(?,?,?)")
       .bind(await digest(token), id, now() + 3600)
+      .run();
+    await db
+      .prepare("UPDATE users SET approval_status='approved' WHERE id=?")
+      .bind(id)
       .run();
     return "handicraft_session=" + token;
   }
@@ -227,7 +233,7 @@ test("primary trial: eligibility, school conflicts, full panels, deductions, nor
     ).status,
     409,
   );
-  for (const id of ["conflicted", "judge0", "judge1", "judge2"])
+  for (const id of ["judge0", "judge1", "judge2"])
     assert.equal(
       (
         await call("/admin/assignment", {

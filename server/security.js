@@ -57,6 +57,9 @@ export const publicUser = (u) =>
         school: u.school,
         role: u.role,
         applicant_role: u.applicant_role ?? null,
+        approval_status: u.approval_status ?? "pending",
+        approval_note: u.approval_note || "",
+        identity_document_id: u.identity_document_id || null,
       }
     : null;
 export const medal = (s) =>

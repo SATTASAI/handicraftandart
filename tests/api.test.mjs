@@ -45,6 +45,7 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
     "0006_certificate_deliveries.sql",
     "0007_trial_rules_2568.sql",
     "0008_primary_catalog_2568.sql",
+    "0009_verified_workflow.sql",
   ])
     for (const sql of (await readFile("migrations/" + name, "utf8"))
       .split(";")
@@ -53,7 +54,7 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
       await db.prepare(sql).run();
   await db
     .prepare(
-      "UPDATE competitions SET registration_open=1 WHERE id IN ('painting','trial73-painting','trial73-weaving')",
+      "UPDATE competitions SET registration_open=1,workflow_version=0 WHERE id IN ('painting','trial73-painting','trial73-weaving')",
     )
     .run();
   async function call(path, data, cookie = "", headers = {}) {
@@ -68,9 +69,15 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
       },
       ...(data === undefined ? {} : { body: JSON.stringify(data) }),
     });
+    const result = await r.json();
+    if (path === "/auth/register" && result.user)
+      await db
+        .prepare("UPDATE users SET approval_status='approved' WHERE id=?")
+        .bind(result.user.id)
+        .run();
     return {
       status: r.status,
-      body: await r.json(),
+      body: result,
       cookie: r.headers.get("set-cookie")?.split(";")[0],
     };
   }
