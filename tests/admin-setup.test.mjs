@@ -23,6 +23,9 @@ async function localRuntime(t) {
     "0001_initial.sql",
     "0002_competitions.sql",
     "0003_work_link.sql",
+    "0006_certificate_deliveries.sql",
+    "0007_trial_rules_2568.sql",
+    "0008_primary_catalog_2568.sql",
   ])
     await migration(db, name);
   return { mf, db };

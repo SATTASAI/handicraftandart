@@ -9,6 +9,8 @@ import {
   safeText,
   validPassword,
 } from "./security.js";
+const schoolKey = (value) =>
+  String(value).normalize("NFKC").toLowerCase().replace(/\s+/gu, "");
 const EVENT_TITLE =
   "งานศิลปหัตถกรรม ศูนย์เครือข่ายสองพี่น้อง ห้วยแม่เพรียง ป่าเด็ง ประจำปีการศึกษา 2569";
 class HttpError extends Error {
@@ -80,8 +82,94 @@ function requireSecret(env) {
   if (!env.AUTH_SECRET || env.AUTH_SECRET.length < 32)
     fail(503, "ผู้ดูแลต้องตั้งค่า AUTH_SECRET ก่อนใช้งานระบบบัญชี");
 }
+const DEFAULT_RULES = [
+  { label: "คุณภาพผลงาน", max: 40 },
+  { label: "ความคิดสร้างสรรค์", max: 30 },
+  { label: "กระบวนการทำงาน", max: 20 },
+  { label: "การนำเสนอ", max: 10 },
+];
+function competitionRules(c) {
+  return {
+    ...c,
+    score_rules: c.score_rules ? JSON.parse(c.score_rules) : DEFAULT_RULES,
+    policy: c.policy_json ? JSON.parse(c.policy_json) : {},
+  };
+}
+function validateRules(value, total = 100) {
+  if (
+    !Array.isArray(value) ||
+    !value.length ||
+    value.length > 20 ||
+    value.some(
+      (x) =>
+        !x ||
+        !safeText(x.label, 150) ||
+        typeof x.max !== "number" ||
+        !Number.isFinite(x.max) ||
+        x.max <= 0 ||
+        x.max > 100,
+    ) ||
+    Math.abs(value.reduce((sum, x) => sum + x.max, 0) - total) > 0.001
+  )
+    fail(
+      400,
+      "เกณฑ์ต้องมีชื่อและคะแนนบวก รวมตรงกับคะแนนเต็ม (ไม่เกิน 20 หัวข้อ)",
+    );
+  return value.map((x) => ({ label: safeText(x.label, 150), max: x.max }));
+}
+function validatePolicy(value, fallback) {
+  if (value === undefined) return fallback;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    fail(400, "คุณสมบัติรายการไม่ถูกต้อง");
+  const p = {
+    score_total: 100,
+    allowed_judge_counts: [1, 2, 3, 4, 5],
+    allowed_grades: ["ป.1", "ป.2", "ป.3", "ป.4", "ป.5", "ป.6"],
+    ...fallback,
+    ...value,
+  };
+  if (
+    !Number.isFinite(p.score_total) ||
+    p.score_total <= 0 ||
+    p.score_total > 1000
+  )
+    fail(400, "คะแนนเต็มไม่ถูกต้อง");
+  if (
+    !Array.isArray(p.allowed_judge_counts) ||
+    !p.allowed_judge_counts.length ||
+    p.allowed_judge_counts.some((n) => !Number.isInteger(n) || n < 1 || n > 9)
+  )
+    fail(400, "จำนวนกรรมการต้องอยู่ระหว่าง 1–9 คน");
+  p.allowed_judge_counts = [...new Set(p.allowed_judge_counts)].sort(
+    (a, b) => a - b,
+  );
+  if (p.age_min) {
+    if (
+      !Number.isInteger(p.age_min) ||
+      !Number.isInteger(p.age_max) ||
+      p.age_min < 7 ||
+      p.age_max > 12 ||
+      p.age_min > p.age_max
+    )
+      fail(400, "ช่วงอายุทดสอบต้องอยู่ระหว่าง 7–12 ปี");
+    p.allowed_grades = [];
+  } else if (
+    !Array.isArray(p.allowed_grades) ||
+    !p.allowed_grades.length ||
+    p.allowed_grades.some((g) => !/^ป\.[1-6]$/.test(g))
+  )
+    fail(400, "เลือกระดับประถมที่รับสมัคร");
+  if (p.gender && !["ชาย", "หญิง"].includes(p.gender))
+    fail(400, "ประเภทชาย/หญิงไม่ถูกต้อง");
+  if (
+    p.division &&
+    !["general", "inclusive", "disability", "special"].includes(p.division)
+  )
+    fail(400, "หมวดสถานศึกษาไม่ถูกต้อง");
+  return p;
+}
 async function results(env, competitionId) {
-  let q = `SELECT r.id,r.school,r.students,r.coaches,r.competition_id,AVG(s.total) AS score,c.title,c.grade,c.published,r.work_url FROM registrations r JOIN competitions c ON c.id=r.competition_id JOIN scores s ON s.registration_id=r.id WHERE c.published=1 AND r.status='submitted'`;
+  let q = `SELECT r.id,r.school,r.students,r.coaches,r.competition_id,AVG(s.total) AS score,c.title,c.grade,c.published,r.work_url,r.decision,c.rules_version FROM registrations r JOIN competitions c ON c.id=r.competition_id LEFT JOIN scores s ON s.registration_id=r.id WHERE c.published=1 AND r.status='submitted'`;
   const stmt = env.DB.prepare(
     q +
       (competitionId ? " AND c.id=?" : "") +
@@ -92,8 +180,12 @@ async function results(env, competitionId) {
     ...x,
     students: JSON.parse(x.students),
     coaches: JSON.parse(x.coaches),
-    score: Math.round(x.score * 100) / 100,
-    medal: medal(Math.round(x.score * 100) / 100),
+    score:
+      x.decision === "disqualified" ? null : Math.round(x.score * 100) / 100,
+    medal:
+      x.decision === "disqualified"
+        ? "ไม่มีสิทธิ์รับรางวัล"
+        : medal(Math.round(x.score * 100) / 100),
   }));
 }
 function emailReady(env) {
@@ -110,6 +202,44 @@ function emailReady(env) {
     return false;
   }
 }
+const eligibleJudges = `SELECT j.id FROM assignments a JOIN users j ON j.id=a.judge_id WHERE a.competition_id=r.competition_id AND j.id<>r.user_id AND j.school_key<>r.school_key`;
+const publicationBlocker = `SELECT 1 FROM registrations r WHERE r.competition_id=competitions.id AND r.status='submitted' AND (
+  (json_extract(competitions.policy_json,'$.eligibility_confirmation')=1 AND r.eligibility_reviewed=0)
+  OR (r.decision='eligible' AND (
+    (SELECT COUNT(*) FROM (${eligibleJudges}))=0
+    OR (json_type(competitions.policy_json,'$.allowed_judge_counts')='array' AND NOT EXISTS(SELECT 1 FROM json_each(competitions.policy_json,'$.allowed_judge_counts') WHERE value=(SELECT COUNT(*) FROM (${eligibleJudges}))))
+    OR EXISTS(SELECT 1 FROM (${eligibleJudges}) j WHERE NOT EXISTS(SELECT 1 FROM scores s WHERE s.registration_id=r.id AND s.judge_id=j.id))
+  ))
+)`;
+async function progressRows(env, id) {
+  const query = `SELECT r.id,r.competition_id,r.decision,r.eligibility_reviewed,c.policy_json,
+    COUNT(j.id) AS required,COUNT(s.judge_id) AS scored FROM registrations r JOIN competitions c ON c.id=r.competition_id
+    LEFT JOIN assignments a ON a.competition_id=r.competition_id
+    LEFT JOIN users j ON j.id=a.judge_id AND j.id<>r.user_id AND j.school_key<>r.school_key AND r.decision='eligible'
+    LEFT JOIN scores s ON s.registration_id=r.id AND s.judge_id=j.id
+    WHERE r.status='submitted' ${id ? "AND r.competition_id=?" : ""} GROUP BY r.id`;
+  const stmt = env.DB.prepare(query);
+  const rows = (await (id ? stmt.bind(id) : stmt).all()).results;
+  return rows.map((r) => {
+    const policy = JSON.parse(r.policy_json);
+    const reviewed =
+      !policy.eligibility_confirmation || !!r.eligibility_reviewed;
+    const validJudges =
+      r.decision === "disqualified" ||
+      (r.required > 0 &&
+        (!policy.allowed_judge_counts ||
+          policy.allowed_judge_counts.includes(r.required)));
+    return {
+      ...r,
+      ready:
+        reviewed &&
+        validJudges &&
+        (r.decision === "disqualified" || r.scored === r.required),
+      reviewed,
+      validJudges,
+    };
+  });
+}
 async function api(r, env) {
   const url = new URL(r.url),
     path = url.pathname,
@@ -123,13 +253,20 @@ async function api(r, env) {
   if (path === "/api/health" && method === "GET") {
     await env.DB.prepare("SELECT 1 FROM competitions LIMIT 1").first();
     await env.DB.prepare("SELECT applicant_role FROM users LIMIT 1").first();
+    await env.DB.prepare(
+      "SELECT policy_json FROM competitions LIMIT 1",
+    ).first();
+    await env.DB.prepare(
+      "SELECT eligibility_reviewed FROM registrations LIMIT 1",
+    ).first();
+    await env.DB.prepare("SELECT deduction FROM scores LIMIT 1").first();
     const setup = await env.DB.prepare(
       "SELECT 1 AS ready FROM system_setup s JOIN users u ON u.id = s.user_id WHERE s.key = 'initial_admin' AND u.role = 'admin' LIMIT 1",
     ).first();
     return json({
       ok: true,
       adminSetupComplete: Boolean(setup),
-      release: "competition-operations-2569",
+      release: "primary-criteria-2568-trial",
     });
   }
   if (path === "/api/competitions" && method === "GET") {
@@ -137,7 +274,7 @@ async function api(r, env) {
     return json({
       competitions: (
         await env.DB.prepare("SELECT * FROM competitions ORDER BY rowid").all()
-      ).results,
+      ).results.map(competitionRules),
       demo: env.DEMO_MODE !== "false",
     });
   }
@@ -171,9 +308,18 @@ async function api(r, env) {
       hash = await passwordHash(b.password, env.AUTH_SECRET);
     try {
       await env.DB.prepare(
-        "INSERT INTO users(id,email,name,school,password_hash,applicant_role,created_at) VALUES(?,?,?,?,?,?,?)",
+        "INSERT INTO users(id,email,name,school,password_hash,applicant_role,created_at,school_key) VALUES(?,?,?,?,?,?,?,?)",
       )
-        .bind(id, email, name, school, hash, applicantRole, now())
+        .bind(
+          id,
+          email,
+          name,
+          school,
+          hash,
+          applicantRole,
+          now(),
+          schoolKey(school),
+        )
         .run();
     } catch (e) {
       if (String(e).includes("UNIQUE"))
@@ -361,10 +507,15 @@ async function api(r, env) {
       .first();
     if (existing?.status === "submitted")
       fail(409, "ส่งรายการแล้ว หากต้องการแก้ไขให้ติดต่อผู้จัดงาน");
+    const policy = competitionRules(c).policy;
     const students = Array.isArray(b.students)
       ? b.students.map((s) => ({
           name: safeText(s?.name, 100),
           grade: safeText(s?.grade, 10),
+          ...(policy.age_min ? { age: Number(s?.age) } : {}),
+          ...(policy.gender || policy.mixed_gender_pair
+            ? { gender: safeText(s?.gender, 10) }
+            : {}),
         }))
       : [];
     const coaches = Array.isArray(b.coaches)
@@ -375,23 +526,48 @@ async function api(r, env) {
       fail(400, "จำนวนผู้เข้าแข่งขันหรือครูเกินกำหนด");
     if (
       !draft &&
-      (!students.length ||
-        !coaches.length ||
+      (students.length < (c.min_students || 1) ||
+        coaches.length < (policy.min_coaches || 1) ||
         students.some(
           (s) =>
             s.name.length < 2 ||
-            !/^ป\.[1-6]$/.test(s.grade) ||
-            (c.grade === "ป.4–6" && Number(s.grade.slice(2)) < 4),
+            (policy.age_min
+              ? !Number.isInteger(s.age) ||
+                s.age < policy.age_min ||
+                s.age > policy.age_max
+              : !(
+                  policy.allowed_grades ||
+                  (c.grade === "ป.4–6"
+                    ? ["ป.4", "ป.5", "ป.6"]
+                    : ["ป.1", "ป.2", "ป.3", "ป.4", "ป.5", "ป.6"])
+                ).includes(s.grade)) ||
+            (policy.gender && s.gender !== policy.gender) ||
+            (policy.mixed_gender_pair && !["ชาย", "หญิง"].includes(s.gender)),
         ) ||
         coaches.some((s) => s.name.length < 2))
     )
       fail(400, "กรอกรายชื่อนักเรียน ระดับชั้น และครูผู้ฝึกซ้อมให้ครบตามเกณฑ์");
+    if (
+      !draft &&
+      policy.mixed_gender_pair &&
+      (students.filter((x) => x.gender === "ชาย").length !== 1 ||
+        students.filter((x) => x.gender === "หญิง").length !== 1)
+    )
+      fail(400, "รายการนี้ต้องเป็นคู่ชาย–หญิง");
+    if (
+      !draft &&
+      policy.eligibility_confirmation &&
+      b.eligibility_confirmed !== true
+    )
+      fail(400, "กรุณายืนยันคุณสมบัติและเตรียมเอกสารตามเกณฑ์");
     const work = safeText(b.work_url, 1000);
+    if (!draft && policy.work_required && !work)
+      fail(400, "รายการนี้ต้องแนบลิงก์ผลงาน");
     if (work && (!work.startsWith("https://") || !URL.canParse(work)))
       fail(400, "ลิงก์ผลงานต้องเป็น HTTPS");
     const id = existing?.id || crypto.randomUUID();
     const saved = await env.DB.prepare(
-      "INSERT INTO registrations(id,user_id,competition_id,school,students,coaches,status,created_at,work_url) SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM competitions WHERE id=? AND registration_open=1 AND published=0) ON CONFLICT(user_id,competition_id) DO UPDATE SET students=excluded.students,coaches=excluded.coaches,status=excluded.status,work_url=excluded.work_url WHERE registrations.status='draft'",
+      "INSERT INTO registrations(id,user_id,competition_id,school,students,coaches,status,created_at,work_url,school_key,eligibility_confirmed) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM competitions WHERE id=? AND registration_open=1 AND published=0 AND COALESCE(score_rules,'')=? AND policy_json=? AND min_students=? AND max_students=? AND max_coaches=?) AND NOT EXISTS(SELECT 1 FROM registrations WHERE competition_id=? AND school_key=? AND status='submitted' AND id<>?) ON CONFLICT(user_id,competition_id) DO UPDATE SET students=excluded.students,coaches=excluded.coaches,status=excluded.status,work_url=excluded.work_url,eligibility_confirmed=excluded.eligibility_confirmed WHERE registrations.status='draft'",
     )
       .bind(
         id,
@@ -403,10 +579,24 @@ async function api(r, env) {
         draft ? "draft" : "submitted",
         now(),
         work,
+        schoolKey(user.school),
+        b.eligibility_confirmed === true ? 1 : 0,
         c.id,
+        c.score_rules || "",
+        c.policy_json,
+        c.min_students,
+        c.max_students,
+        c.max_coaches,
+        c.id,
+        schoolKey(user.school),
+        id,
       )
       .run();
-    if (!saved.meta.changes) fail(409, "รายการนี้ถูกส่งแล้ว ไม่สามารถแก้ไขได้");
+    if (!saved.meta.changes)
+      fail(
+        409,
+        "รายการนี้ถูกส่งแล้ว โรงเรียนสมัครซ้ำ หรือเกณฑ์เปลี่ยน กรุณาตรวจสอบใหม่",
+      );
     return json(
       { id, message: draft ? "บันทึกฉบับร่างแล้ว" : "ลงทะเบียนสำเร็จ" },
       201,
@@ -415,9 +605,9 @@ async function api(r, env) {
   if (path === "/api/judge/registrations" && method === "GET") {
     if (!["judge", "admin"].includes(user.role)) fail(403, "เฉพาะกรรมการ");
     const rows = await env.DB.prepare(
-      `SELECT r.*,c.title,c.published,s.criteria,s.total,s.comment FROM registrations r JOIN competitions c ON c.id=r.competition_id LEFT JOIN scores s ON s.registration_id=r.id AND s.judge_id=? WHERE r.status='submitted' AND EXISTS(SELECT 1 FROM assignments a WHERE a.competition_id=c.id AND a.judge_id=?) ORDER BY c.title,r.created_at`,
+      `SELECT r.*,c.title,c.published,c.score_rules,c.policy_json,c.rules_version,c.rules_source_url,s.criteria,s.total,s.comment,s.deduction,s.deduction_reason FROM registrations r JOIN competitions c ON c.id=r.competition_id LEFT JOIN scores s ON s.registration_id=r.id AND s.judge_id=? WHERE r.status='submitted' AND r.decision='eligible' AND r.user_id<>? AND r.school_key<>? AND EXISTS(SELECT 1 FROM assignments a WHERE a.competition_id=c.id AND a.judge_id=?) ORDER BY c.title,r.created_at`,
     )
-      .bind(user.id, user.id)
+      .bind(user.id, user.id, schoolKey(user.school), user.id)
       .all();
     return json({
       registrations: rows.results.map((x) => ({
@@ -425,33 +615,55 @@ async function api(r, env) {
         students: JSON.parse(x.students),
         coaches: JSON.parse(x.coaches),
         criteria: x.criteria ? JSON.parse(x.criteria) : null,
+        score_rules: competitionRules(x).score_rules,
+        policy: competitionRules(x).policy,
       })),
     });
   }
   if (path === "/api/judge/score" && method === "POST") {
     const b = await body(r);
     const reg = await env.DB.prepare(
-      `SELECT r.*,c.published FROM registrations r JOIN competitions c ON c.id=r.competition_id WHERE r.id=? AND r.status='submitted' AND EXISTS(SELECT 1 FROM assignments WHERE competition_id=r.competition_id AND judge_id=?)`,
+      `SELECT r.*,c.published,c.score_rules,c.policy_json FROM registrations r JOIN competitions c ON c.id=r.competition_id WHERE r.id=? AND r.status='submitted' AND r.decision='eligible' AND r.user_id<>? AND r.school_key<>? AND EXISTS(SELECT 1 FROM assignments WHERE competition_id=r.competition_id AND judge_id=?)`,
     )
-      .bind(safeText(b.registration_id), user.id)
+      .bind(
+        safeText(b.registration_id),
+        user.id,
+        schoolKey(user.school),
+        user.id,
+      )
       .first();
     if (!["judge", "admin"].includes(user.role) || !reg)
       fail(403, "คุณไม่ได้รับมอบหมายรายการนี้");
     if (reg.published) fail(409, "ประกาศผลแล้ว ไม่สามารถแก้คะแนนได้");
     const values = b.criteria,
-      max = [40, 30, 20, 10];
+      max = competitionRules(reg).score_rules.map((x) => x.max);
     if (
       !Array.isArray(values) ||
-      values.length !== 4 ||
+      values.length !== max.length ||
       values.some(
         (v, i) =>
           typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > max[i],
       )
     )
       fail(400, "คะแนนต้องอยู่ในช่วงที่กำหนด");
-    const total = Math.round(values.reduce((a, b) => a + b, 0) * 100) / 100;
+    const rawMax = max.reduce((a, b) => a + b, 0),
+      deduction = b.deduction === undefined ? 0 : b.deduction;
+    const deductionReason = safeText(b.deduction_reason, 1000);
+    if (
+      typeof deduction !== "number" ||
+      !Number.isFinite(deduction) ||
+      deduction < 0 ||
+      deduction > rawMax ||
+      (deduction > 0 && !deductionReason)
+    )
+      fail(400, "คะแนนหักต้องอยู่ในช่วงคะแนนเต็มและระบุเหตุผลตามข้อกำหนด");
+    const total =
+      Math.round(
+        (Math.max(0, values.reduce((a, b) => a + b, 0) - deduction) / rawMax) *
+          10000,
+      ) / 100;
     const scored = await env.DB.prepare(
-      `INSERT INTO scores SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM registrations r JOIN competitions c ON c.id=r.competition_id JOIN assignments a ON a.competition_id=c.id WHERE r.id=? AND a.judge_id=? AND c.published=0 AND r.status='submitted') ON CONFLICT(registration_id,judge_id) DO UPDATE SET criteria=excluded.criteria,total=excluded.total,comment=excluded.comment,created_at=excluded.created_at`,
+      `INSERT INTO scores(registration_id,judge_id,criteria,total,comment,created_at,deduction,deduction_reason) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM registrations r JOIN competitions c ON c.id=r.competition_id JOIN assignments a ON a.competition_id=c.id WHERE r.id=? AND a.judge_id=? AND c.published=0 AND r.status='submitted' AND r.decision='eligible' AND r.user_id<>a.judge_id AND r.school_key<>(SELECT school_key FROM users WHERE id=a.judge_id)) ON CONFLICT(registration_id,judge_id) DO UPDATE SET criteria=excluded.criteria,total=excluded.total,comment=excluded.comment,created_at=excluded.created_at,deduction=excluded.deduction,deduction_reason=excluded.deduction_reason`,
     )
       .bind(
         reg.id,
@@ -460,6 +672,8 @@ async function api(r, env) {
         total,
         safeText(b.comment, 1000),
         now(),
+        deduction,
+        deductionReason,
         reg.id,
         user.id,
       )
@@ -493,15 +707,26 @@ async function api(r, env) {
     ).results;
     const registrations = (
       await env.DB.prepare(
-        `SELECT r.id,r.competition_id,r.school,r.students,r.coaches,r.status,r.created_at,
+        `SELECT r.id,r.competition_id,r.school,r.students,r.coaches,r.status,r.created_at,r.decision,r.decision_note,r.eligibility_reviewed,
       u.name AS contact_name,u.email,c.title,c.published,
       d.status AS email_status,d.sent_at,d.last_error
       FROM registrations r JOIN users u ON u.id=r.user_id JOIN competitions c ON c.id=r.competition_id
       LEFT JOIN certificate_deliveries d ON d.registration_id=r.id ORDER BY r.created_at DESC`,
       ).all()
     ).results;
+    const progress = await progressRows(env);
     return json({
-      competitions,
+      competitions: competitions.map((c) => {
+        const rows = progress.filter((r) => r.competition_id === c.id);
+        return {
+          ...competitionRules(c),
+          required: rows.reduce((n, r) => n + r.required, 0),
+          scored: rows.reduce((n, r) => n + r.scored, 0),
+          ready: rows.length > 0 && rows.every((r) => r.ready),
+          unreviewed: rows.filter((r) => !r.reviewed).length,
+          invalid_judges: rows.filter((r) => !r.validJudges).length,
+        };
+      }),
       registrations: registrations.map((r) => ({
         ...r,
         students: JSON.parse(r.students),
@@ -531,6 +756,13 @@ async function api(r, env) {
       .first();
     if (!reg) fail(404, "ไม่พบรายการลงทะเบียนที่ยืนยันแล้ว");
     if (!reg.published) fail(409, "ต้องประกาศผลก่อนส่งประกาศนียบัตร");
+    const decision = await env.DB.prepare(
+      "SELECT decision FROM registrations WHERE id=?",
+    )
+      .bind(reg.id)
+      .first();
+    if (decision.decision === "disqualified")
+      fail(409, "รายการนี้ไม่มีสิทธิ์รับประกาศนียบัตร");
     const t = now();
     // A stable provider key and a short lease prevent duplicate concurrent sends.
     await env.DB.prepare(
@@ -653,6 +885,60 @@ async function api(r, env) {
         .run();
     return json({ ok: true });
   }
+  if (path === "/api/admin/competition-copy" && method === "POST") {
+    auth(user, "admin");
+    const b = await body(r);
+    const source = await env.DB.prepare("SELECT * FROM competitions WHERE id=?")
+      .bind(safeText(b.id))
+      .first();
+    if (!source) fail(404, "ไม่พบรายการต้นฉบับ");
+    const id = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO competitions(id,title,category,grade,cover,description,venue,schedule,max_students,max_coaches,registration_open,published,min_students,score_rules,rules_source_url,rules_version,policy_json) VALUES(?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?)`,
+    )
+      .bind(
+        id,
+        source.title + " (ฉบับใหม่)",
+        source.category,
+        source.grade,
+        source.cover,
+        source.description,
+        "รอประกาศ",
+        "รอประกาศ",
+        source.max_students,
+        source.max_coaches,
+        source.min_students,
+        source.score_rules,
+        source.rules_source_url,
+        source.rules_version,
+        source.policy_json,
+      )
+      .run();
+    return json(
+      {
+        id,
+        message: "สร้างรายการฉบับใหม่แล้ว ยังปิดรับสมัครจนกว่าผู้จัดตรวจเกณฑ์",
+      },
+      201,
+    );
+  }
+  if (path === "/api/admin/decision" && method === "POST") {
+    auth(user, "admin");
+    const b = await body(r),
+      note = safeText(b.note, 1000);
+    if (
+      !["eligible", "disqualified"].includes(b.decision) ||
+      (b.decision === "disqualified" && note.length < 2)
+    )
+      fail(400, "กรุณาระบุผลตรวจและเหตุผล");
+    const changed = await env.DB.prepare(
+      `UPDATE registrations SET decision=?,decision_note=?,eligibility_reviewed=1 WHERE id=? AND status='submitted' AND EXISTS(SELECT 1 FROM competitions WHERE id=registrations.competition_id AND published=0)`,
+    )
+      .bind(b.decision, note, safeText(b.registration_id))
+      .run();
+    if (!changed.meta.changes) fail(409, "รายการไม่พบหรือประกาศผลแล้ว");
+    return json({ ok: true });
+  }
   if (path === "/api/admin/competition" && method === "POST") {
     auth(user, "admin");
     const b = await body(r);
@@ -667,8 +953,57 @@ async function api(r, env) {
       schedule = safeText(b.schedule, 200);
     if (!title || !description || !venue || !schedule)
       fail(400, "กรอกรายละเอียดให้ครบ");
-    await env.DB.prepare(
-      "UPDATE competitions SET title=?,description=?,venue=?,schedule=?,registration_open=? WHERE id=? AND published=0",
+    const policy = validatePolicy(b.policy, competitionRules(c).policy);
+    const rules = validateRules(
+      b.score_rules === undefined
+        ? competitionRules(c).score_rules
+        : b.score_rules,
+      policy.score_total || 100,
+    );
+    const source =
+      b.rules_source_url === undefined
+        ? c.rules_source_url
+        : safeText(b.rules_source_url, 1000);
+    if (
+      source &&
+      (!URL.canParse(source) ||
+        new URL(source).protocol !== "https:" ||
+        new URL(source).username ||
+        new URL(source).password)
+    )
+      fail(400, "ลิงก์เกณฑ์ต้องเป็น HTTPS");
+    const version =
+      b.rules_version === undefined
+        ? c.rules_version
+        : safeText(b.rules_version, 200);
+    const min =
+      b.min_students === undefined ? c.min_students : Number(b.min_students);
+    const maxStudents =
+      b.max_students === undefined ? c.max_students : Number(b.max_students);
+    const maxCoaches =
+      b.max_coaches === undefined ? c.max_coaches : Number(b.max_coaches);
+    if (
+      ![min, maxStudents, maxCoaches].every(
+        (x) => Number.isInteger(x) && x >= 1 && x <= 100,
+      ) ||
+      min > maxStudents ||
+      !Number.isInteger(policy.min_coaches || 1) ||
+      (policy.min_coaches || 1) < 1 ||
+      (policy.min_coaches || 1) > maxCoaches ||
+      !version
+    )
+      fail(400, "ตรวจสอบจำนวนคนและชื่อรุ่นเกณฑ์");
+    const changed =
+      JSON.stringify(policy) !== JSON.stringify(competitionRules(c).policy) ||
+      JSON.stringify(rules) !==
+        JSON.stringify(competitionRules(c).score_rules) ||
+      min !== c.min_students ||
+      maxStudents !== c.max_students ||
+      maxCoaches !== c.max_coaches ||
+      source !== c.rules_source_url ||
+      version !== c.rules_version;
+    const updated = await env.DB.prepare(
+      `UPDATE competitions SET title=?,description=?,venue=?,schedule=?,registration_open=?,score_rules=?,rules_source_url=?,rules_version=?,min_students=?,max_students=?,max_coaches=?,policy_json=?,grade=? WHERE id=? AND published=0 AND (?=0 OR NOT EXISTS(SELECT 1 FROM registrations WHERE competition_id=? AND status='submitted'))`,
     )
       .bind(
         title,
@@ -676,40 +1011,47 @@ async function api(r, env) {
         venue,
         schedule,
         b.registration_open ? 1 : 0,
+        JSON.stringify(rules),
+        source,
+        version,
+        min,
+        maxStudents,
+        maxCoaches,
+        JSON.stringify(policy),
+        b.policy
+          ? policy.age_min
+            ? `อายุ ${policy.age_min}–${policy.age_max} ปี`
+            : policy.allowed_grades.join(", ")
+          : c.grade,
+        c.id,
+        changed ? 1 : 0,
         c.id,
       )
       .run();
+    if (!updated.meta.changes)
+      fail(
+        409,
+        "มีการยืนยันสมัครแล้วหรือประกาศผลแล้ว ไม่สามารถเปลี่ยนเกณฑ์และจำนวนคน ให้สร้างรายการแยกสำหรับเกณฑ์ใหม่",
+      );
     return json({ ok: true });
   }
   if (path === "/api/admin/publish" && method === "POST") {
     auth(user, "admin");
     const b = await body(r),
       id = safeText(b.competition_id);
-    const judges = await env.DB.prepare(
-      "SELECT COUNT(*) n FROM assignments WHERE competition_id=?",
-    )
-      .bind(id)
-      .first();
-    const regs = await env.DB.prepare(
-      "SELECT COUNT(*) n FROM registrations WHERE competition_id=? AND status='submitted'",
-    )
-      .bind(id)
-      .first();
-    if (!judges.n || !regs.n) fail(409, "ต้องมีผู้สมัครและกรรมการก่อนประกาศผล");
-    const incomplete = await env.DB.prepare(
-      `SELECT COUNT(*) n FROM registrations r CROSS JOIN assignments a LEFT JOIN scores s ON s.registration_id=r.id AND s.judge_id=a.judge_id WHERE r.competition_id=? AND a.competition_id=r.competition_id AND r.status='submitted' AND s.registration_id IS NULL`,
-    )
-      .bind(id)
-      .first();
-    if (incomplete.n) fail(409, "กรรมการยังให้คะแนนไม่ครบทุกทีม");
+    const progress = await progressRows(env, id);
+    if (!progress.length) fail(409, "ต้องมีทีมที่ยืนยันสมัครก่อนประกาศผล");
+    if (progress.some((r) => !r.reviewed))
+      fail(409, "ผู้จัดยังตรวจคุณสมบัติไม่ครบทุกทีม");
+    if (progress.some((r) => !r.validJudges))
+      fail(
+        409,
+        "จำนวนกรรมการที่ไม่มีส่วนได้เสียไม่ตรงเกณฑ์ กรุณาตรวจการมอบหมายและโรงเรียน",
+      );
+    if (progress.some((r) => !r.ready))
+      fail(409, "กรรมการยังให้คะแนนไม่ครบทุกทีม");
     const published = await env.DB.prepare(
-      `UPDATE competitions SET published=1,registration_open=0
-      WHERE id=? AND published=0
-      AND EXISTS(SELECT 1 FROM assignments WHERE competition_id=competitions.id)
-      AND EXISTS(SELECT 1 FROM registrations WHERE competition_id=competitions.id AND status='submitted')
-      AND NOT EXISTS(SELECT 1 FROM registrations r JOIN assignments a ON a.competition_id=r.competition_id
-        LEFT JOIN scores s ON s.registration_id=r.id AND s.judge_id=a.judge_id
-        WHERE r.competition_id=competitions.id AND r.status='submitted' AND s.registration_id IS NULL)`,
+      `UPDATE competitions SET published=1,registration_open=0 WHERE id=? AND published=0 AND EXISTS(SELECT 1 FROM registrations WHERE competition_id=competitions.id AND status='submitted') AND NOT EXISTS(${publicationBlocker})`,
     )
       .bind(id)
       .run();
@@ -731,6 +1073,8 @@ async function api(r, env) {
       (x) => x.id === id,
     );
     if (!result) fail(409, "ยังไม่ยืนยันผลการแข่งขัน");
+    if (reg.decision === "disqualified")
+      fail(409, "รายการนี้ไม่มีสิทธิ์รับประกาศนียบัตร");
     return json({
       certificate: {
         ...result,

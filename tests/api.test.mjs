@@ -43,12 +43,19 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
     "0003_work_link.sql",
     "0005_applicant_roles.sql",
     "0006_certificate_deliveries.sql",
+    "0007_trial_rules_2568.sql",
+    "0008_primary_catalog_2568.sql",
   ])
     for (const sql of (await readFile("migrations/" + name, "utf8"))
       .split(";")
       .map((s) => s.trim())
       .filter(Boolean))
       await db.prepare(sql).run();
+  await db
+    .prepare(
+      "UPDATE competitions SET registration_open=1 WHERE id IN ('painting','trial73-painting','trial73-weaving')",
+    )
+    .run();
   async function call(path, data, cookie = "", headers = {}) {
     const r = await mf.dispatchFetch(origin + "/api" + path, {
       method: data === undefined ? "GET" : "POST",
@@ -129,7 +136,10 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
   assert(teacher.cookie);
   const list = await call("/competitions", undefined, teacher.cookie);
   assert.equal(list.status, 200);
-  assert.equal(list.body.competitions.length, 6);
+  assert.equal(
+    list.body.competitions.filter((c) => c.policy.division).length,
+    197,
+  );
   assert.equal(
     (await call("/auth/me", undefined, teacher.cookie)).body.user.school,
     "โรงเรียนทดสอบ",
@@ -424,6 +434,135 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
       )
     ).status,
     409,
+  );
+  // Imported rules use separate IDs, exact team sizes and competition-specific rubrics.
+  const catalog = (await call("/competitions", undefined, teacher.cookie)).body
+    .competitions;
+  const trial = catalog.find((c) => c.id === "trial73-painting");
+  assert.equal(trial.score_rules.length, 5);
+  assert.equal(
+    trial.score_rules.reduce((sum, x) => sum + x.max, 0),
+    100,
+  );
+  assert.match(trial.rules_version, /2568/);
+  assert.match(trial.rules_source_url, /1MZYpe-dzfKFfCZ42Qmcc3FRRl5OHEsOl/);
+  const ruleEdit = {
+    ...trial,
+    score_rules: trial.score_rules.map((x, i) =>
+      i === 0 ? { ...x, label: "หัวข้อทดสอบฉบับปรับปรุง" } : x,
+    ),
+  };
+  assert.equal(
+    (
+      await call(
+        "/admin/competition",
+        { ...ruleEdit, score_rules: [{ label: "ไม่ครบ", max: 90 }] },
+        admin.cookie,
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await call(
+        "/admin/competition",
+        { ...ruleEdit, rules_source_url: "javascript:alert(1)" },
+        admin.cookie,
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (await call("/admin/competition", ruleEdit, teacher.cookie)).status,
+    403,
+  );
+  assert.equal(
+    (await call("/admin/competition", ruleEdit, admin.cookie)).status,
+    200,
+  );
+  const trialReg = await call(
+    "/registrations",
+    {
+      competition_id: trial.id,
+      students: [{ name: "นักเรียนเกณฑ์เดิม", grade: "ป.5" }],
+      coaches: [{ name: "ครูทดสอบ" }],
+    },
+    teacher.cookie,
+  );
+  assert.equal(trialReg.status, 201);
+  assert.equal(
+    (
+      await call(
+        "/admin/competition",
+        { ...ruleEdit, score_rules: trial.score_rules },
+        admin.cookie,
+      )
+    ).status,
+    409,
+  );
+  assert.equal(
+    (
+      await call(
+        "/admin/assignment",
+        { competition_id: trial.id, judge_id: judge.body.user.id },
+        admin.cookie,
+      )
+    ).status,
+    200,
+  );
+  const judgeRows = (
+    await call("/judge/registrations", undefined, judge.cookie)
+  ).body.registrations;
+  assert.equal(
+    judgeRows.find((r) => r.id === trialReg.body.id).score_rules.length,
+    5,
+  );
+  assert.equal(
+    (
+      await call(
+        "/judge/score",
+        { registration_id: trialReg.body.id, criteria: [40, 30, 20, 10] },
+        judge.cookie,
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await call(
+        "/judge/score",
+        { registration_id: trialReg.body.id, criteria: [20, 20, 20, 20, 21] },
+        judge.cookie,
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await call(
+        "/judge/score",
+        { registration_id: trialReg.body.id, criteria: [20, 20, 20, 20, 20] },
+        judge.cookie,
+      )
+    ).body.total,
+    100,
+  );
+  const weavingData = {
+    competition_id: "trial73-weaving",
+    students: [
+      { name: "นักเรียนหนึ่ง", grade: "ป.4" },
+      { name: "นักเรียนสอง", grade: "ป.5" },
+    ],
+    coaches: [{ name: "ครูทดสอบ" }],
+  };
+  assert.equal(
+    (await call("/registrations", weavingData, teacher.cookie)).status,
+    400,
+  );
+  weavingData.students.push({ name: "นักเรียนสาม", grade: "ป.6" });
+  assert.equal(
+    (await call("/registrations", weavingData, teacher.cookie)).status,
+    201,
   );
   const missing = await call("/auth/forgot-password", {
     email: "missing@example.test",

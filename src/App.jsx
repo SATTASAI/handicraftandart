@@ -1,3 +1,5 @@
+import CompetitionPolicy from "./components/CompetitionPolicy";
+import ruleSources from "./rules-sources.json";
 import AdminOperations from "./components/AdminOperations";
 import { ApplicantTable } from "./components/ApplicantTable";
 import React, { useEffect, useRef, useState } from "react";
@@ -370,9 +372,15 @@ function ResetPassword({ openLogin }) {
 function Directory({ competitions, loading, error }) {
   const [search, setSearch] = useState(""),
     [category, setCategory] = useState(""),
-    [grade, setGrade] = useState("");
+    [grade, setGrade] = useState(""),
+    [division, setDivision] = useState(""),
+    [legacy, setLegacy] = useState(false),
+    [page, setPage] = useState(1);
+  useEffect(() => setPage(1), [search, category, grade, division, legacy]);
   const filtered = competitions.filter(
     (c) =>
+      (legacy || c.policy?.division) &&
+      (!division || c.policy?.division === division) &&
       (c.title + c.category).includes(search) &&
       (!category || c.category === category) &&
       (!grade || c.grade === grade),
@@ -385,6 +393,22 @@ function Directory({ competitions, loading, error }) {
           <p>ค้นหารายการแข่งขัน ดูรายละเอียด และลงทะเบียนเข้าร่วม</p>
         </div>
       </div>
+      <details className="criteria-library">
+        <summary>เอกสารเกณฑ์ปี 2568 — ใช้ทดสอบก่อน (12 ฉบับ)</summary>
+        <p className="helper">
+          รายการที่ขึ้นต้นด้วยเกณฑ์ปี 2568 ใช้ทดสอบเท่านั้น
+          ยังไม่ใช่การยืนยันเกณฑ์ปีการศึกษา 2569 รายการตัวอย่างเดิมยังคงแยกไว้
+        </p>
+        <ul>
+          {ruleSources.map((source) => (
+            <li key={source.id}>
+              <a href={source.url} target="_blank" rel="noopener noreferrer">
+                {source.title}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </details>
       <div className="filters">
         <label className="search">
           <MagnifyingGlass size={23} />
@@ -431,6 +455,33 @@ function Directory({ competitions, loading, error }) {
           </select>
         </label>
       </div>
+      <div className="form-actions">
+        <label>
+          ประเภทสถานศึกษา{" "}
+          <select
+            aria-label="ประเภทสถานศึกษา"
+            value={division}
+            onChange={(e) => setDivision(e.target.value)}
+          >
+            <option value="">ทุกประเภท</option>
+            <option value="general">ทั่วไป</option>
+            <option value="inclusive">เรียนรวม</option>
+            <option value="disability">โรงเรียนเฉพาะความพิการ</option>
+            <option value="special">ศูนย์การศึกษาพิเศษ อายุ 7–12 ปี</option>
+          </select>
+        </label>
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={legacy}
+            onChange={(e) => setLegacy(e.target.checked)}
+          />
+          รวมรายการตัวอย่างเดิม
+        </label>
+      </div>
+      <p className="helper">
+        พบ {filtered.length} รายการ · เกณฑ์ปี 2568 ใช้ทดสอบ
+      </p>
       <Message text={error} />
       {loading ? (
         <div className="loading" role="status">
@@ -440,7 +491,7 @@ function Directory({ competitions, loading, error }) {
         <Empty title="ไม่พบรายการแข่งขัน">ลองเปลี่ยนคำค้นหาหรือตัวกรอง</Empty>
       ) : (
         <div className="competition-grid">
-          {filtered.map((c) => (
+          {filtered.slice((page - 1) * 24, page * 24).map((c) => (
             <a
               key={c.id}
               className="competition-card"
@@ -479,7 +530,10 @@ function Directory({ competitions, loading, error }) {
                 <div className="card-meta">
                   <GraduationCap size={21} />
                   <span>
-                    ระดับชั้น ประถมศึกษาปีที่ {c.grade.replace("ป.", "")}
+                    {c.grade} ·{" "}
+                    {c.policy?.division
+                      ? "เกณฑ์ปี 2568 ใช้ทดสอบ"
+                      : "ตัวอย่างเดิม"}
                   </span>
                 </div>
                 <div className="card-link">
@@ -488,6 +542,31 @@ function Directory({ competitions, loading, error }) {
               </div>
             </a>
           ))}
+        </div>
+      )}
+      {filtered.length > 24 && (
+        <div className="form-actions">
+          <Button
+            disabled={page <= 1}
+            onClick={() => {
+              setPage(page - 1);
+              window.scrollTo(0, 0);
+            }}
+          >
+            ก่อนหน้า
+          </Button>
+          <span>
+            หน้า {page} / {Math.ceil(filtered.length / 24)}
+          </span>
+          <Button
+            disabled={page * 24 >= filtered.length}
+            onClick={() => {
+              setPage(page + 1);
+              window.scrollTo(0, 0);
+            }}
+          >
+            ถัดไป
+          </Button>
         </div>
       )}
     </>
@@ -510,13 +589,56 @@ function CompetitionDetail({ c, onRegister }) {
           <h1>{c.title}</h1>
           <p className="detail-description">{c.description}</p>
           <h2>เกณฑ์และคุณสมบัติ</h2>
+          <p className="helper">
+            {c.rules_version} · หน้าอ้างอิง{" "}
+            {c.policy?.source_page || "ดูต้นฉบับ"}
+          </p>
+          {c.policy?.disability && (
+            <p>คุณสมบัติ: {c.policy.disability} — ผู้จัดตรวจเอกสารหน้างาน</p>
+          )}
+          {c.policy?.allowed_judge_counts && (
+            <p>
+              กรรมการที่ไม่มีส่วนได้เสีย:{" "}
+              {c.policy.allowed_judge_counts.join(" หรือ ")} คน
+            </p>
+          )}
+          {c.policy?.scope_note && (
+            <p className="helper">{c.policy.scope_note}</p>
+          )}
+          {c.policy?.max_coaches_is_default && (
+            <p className="helper">
+              จำนวนครูเป็นค่าทดสอบของผู้จัด ไม่ใช่ข้อกำหนดที่ยืนยันจากเอกสาร
+            </p>
+          )}
+          {c.rules_source_url && (
+            <a
+              className="text-button"
+              href={c.rules_source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              อ่านเอกสารเกณฑ์ต้นฉบับ
+            </a>
+          )}
+          <ul>
+            {c.score_rules.map((rule, i) => (
+              <li key={i}>
+                {rule.label} — {rule.max} คะแนน
+              </li>
+            ))}
+          </ul>
           <div className="spec-row">
             <span>ระดับชั้น</span>
             <strong>{c.grade}</strong>
           </div>
           <div className="spec-row">
             <span>นักเรียน</span>
-            <strong>ไม่เกิน {c.max_students} คน</strong>
+            <strong>
+              {c.min_students === c.max_students
+                ? c.max_students
+                : `${c.min_students || 1}–${c.max_students}`}{" "}
+              คน
+            </strong>
           </div>
           <div className="spec-row">
             <span>ครูผู้ฝึกซ้อม</span>
@@ -563,12 +685,20 @@ function CompetitionDetail({ c, onRegister }) {
 }
 function RegistrationForm({ c, user, onSaved, existing }) {
   const [students, setStudents] = useState(
-      existing?.students || [{ name: "", grade: "" }],
+      existing?.students ||
+        Array.from({ length: c.min_students || 1 }, () => ({
+          name: "",
+          grade: "",
+        })),
     ),
     [coaches, setCoaches] = useState(
-      existing?.coaches || [{ name: user.name }],
+      existing?.coaches ||
+        Array.from({ length: c.policy?.min_coaches || 1 }, (_, i) => ({
+          name: i === 0 ? user.name : "",
+        })),
     ),
     [work, setWork] = useState(existing?.work_url || ""),
+    [confirmed, setConfirmed] = useState(!!existing?.eligibility_confirmed),
     [review, setReview] = useState(false),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -582,6 +712,7 @@ function RegistrationForm({ c, user, onSaved, existing }) {
         coaches,
         status,
         work_url: work,
+        eligibility_confirmed: confirmed,
       });
       onSaved(r.message);
       go("/registrations");
@@ -623,6 +754,20 @@ function RegistrationForm({ c, user, onSaved, existing }) {
             </div>
           </div>
           <Message text={error} />
+          {c.policy?.eligibility_confirmation && (
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={confirmed}
+                disabled={review}
+                required
+                onChange={(e) => setConfirmed(e.target.checked)}
+              />
+              ข้าพเจ้าอ่านเกณฑ์ปี 2568
+              และยืนยันว่าผู้เข้าแข่งขันมีคุณสมบัติตรงตามรายการ โรงเรียน
+              และประเภทที่เลือก พร้อมแสดงเอกสารให้ผู้จัดตรวจหน้างาน
+            </label>
+          )}
           <div className="section-title">
             <h2>รายชื่อนักเรียน ({students.length} คน)</h2>
             {!review && (
@@ -657,33 +802,82 @@ function RegistrationForm({ c, user, onSaved, existing }) {
                   }
                 />
               </Field>
-              <Field label="ระดับชั้น">
-                <select
-                  aria-label={"ระดับชั้น " + (i + 1)}
-                  disabled={review}
-                  value={s.grade}
-                  required
-                  onChange={(e) =>
-                    setStudents(
-                      students.map((x, j) =>
-                        j === i ? { ...x, grade: e.target.value } : x,
-                      ),
-                    )
-                  }
-                >
-                  <option value="">เลือกชั้น</option>
-                  {(c.grade === "ป.4–6" ? [4, 5, 6] : [1, 2, 3, 4, 5, 6]).map(
-                    (n) => (
-                      <option key={n}>ป.{n}</option>
-                    ),
-                  )}
-                </select>
-              </Field>
+              {c.policy?.age_min ? (
+                <Field label="อายุที่ครูยืนยัน (ปี)">
+                  <input
+                    aria-label={"อายุนักเรียน " + (i + 1)}
+                    type="number"
+                    min={c.policy.age_min}
+                    max={c.policy.age_max}
+                    required
+                    readOnly={review}
+                    value={s.age ?? ""}
+                    onChange={(e) =>
+                      setStudents(
+                        students.map((x, j) =>
+                          j === i ? { ...x, age: Number(e.target.value) } : x,
+                        ),
+                      )
+                    }
+                  />
+                </Field>
+              ) : (
+                <Field label="ระดับชั้น">
+                  <select
+                    aria-label={"ระดับชั้น " + (i + 1)}
+                    disabled={review}
+                    value={s.grade}
+                    required
+                    onChange={(e) =>
+                      setStudents(
+                        students.map((x, j) =>
+                          j === i ? { ...x, grade: e.target.value } : x,
+                        ),
+                      )
+                    }
+                  >
+                    <option value="">เลือกชั้น</option>
+                    {(
+                      c.policy?.allowed_grades ||
+                      (c.grade === "ป.4–6"
+                        ? ["ป.4", "ป.5", "ป.6"]
+                        : ["ป.1", "ป.2", "ป.3", "ป.4", "ป.5", "ป.6"])
+                    ).map((g) => (
+                      <option key={g}>{g}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              {(c.policy?.gender || c.policy?.mixed_gender_pair) && (
+                <Field label="ประเภทชาย/หญิงตามรายการ">
+                  <select
+                    aria-label={"ประเภทนักเรียน " + (i + 1)}
+                    required
+                    disabled={review}
+                    value={s.gender || ""}
+                    onChange={(e) =>
+                      setStudents(
+                        students.map((x, j) =>
+                          j === i ? { ...x, gender: e.target.value } : x,
+                        ),
+                      )
+                    }
+                  >
+                    <option value="">เลือกประเภท</option>
+                    {(c.policy.gender
+                      ? [c.policy.gender]
+                      : ["ชาย", "หญิง"]
+                    ).map((g) => (
+                      <option key={g}>{g}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
               {!review && (
                 <button
                   type="button"
                   className="icon-button danger"
-                  disabled={students.length === 1}
+                  disabled={students.length <= (c.min_students || 1)}
                   aria-label={"ลบนักเรียน " + (i + 1)}
                   onClick={() =>
                     setStudents(students.filter((_, j) => i !== j))
@@ -730,7 +924,7 @@ function RegistrationForm({ c, user, onSaved, existing }) {
                 <button
                   type="button"
                   className="icon-button danger"
-                  disabled={coaches.length === 1}
+                  disabled={coaches.length <= (c.policy?.min_coaches || 1)}
                   aria-label={"ลบครู " + (i + 1)}
                   onClick={() => setCoaches(coaches.filter((_, j) => i !== j))}
                 >
@@ -739,12 +933,19 @@ function RegistrationForm({ c, user, onSaved, existing }) {
               )}
             </div>
           ))}
-          <Field label="ลิงก์ผลงาน (ถ้ามี)">
+          <Field
+            label={
+              c.policy?.work_required
+                ? "ลิงก์ผลงาน (จำเป็น)"
+                : "ลิงก์ผลงาน (ถ้ามี)"
+            }
+          >
             <input
               type="url"
               value={work}
               placeholder="https://…"
               maxLength={1000}
+              required={!!c.policy?.work_required}
               readOnly={review}
               onChange={(e) => setWork(e.target.value)}
             />
@@ -1038,6 +1239,8 @@ function Judge({ notify }) {
     [selected, setSelected] = useState(null),
     [values, setValues] = useState(["", "", "", ""]),
     [comment, setComment] = useState(""),
+    [deduction, setDeduction] = useState(0),
+    [deductionReason, setDeductionReason] = useState(""),
     [busy, setBusy] = useState(false);
   const load = () =>
     api("/judge/registrations")
@@ -1048,8 +1251,10 @@ function Judge({ notify }) {
   }, []);
   function select(r) {
     setSelected(r);
-    setValues(r.criteria || ["", "", "", ""]);
+    setValues(r.criteria || r.score_rules.map(() => ""));
     setComment(r.comment || "");
+    setDeduction(r.deduction || 0);
+    setDeductionReason(r.deduction_reason || "");
     setError("");
   }
   async function save(e) {
@@ -1060,6 +1265,8 @@ function Judge({ notify }) {
         registration_id: selected.id,
         criteria: values.map(Number),
         comment,
+        deduction: Number(deduction),
+        deduction_reason: deductionReason,
       });
       notify("บันทึกคะแนนแล้ว");
       setSelected(null);
@@ -1074,8 +1281,8 @@ function Judge({ notify }) {
     <>
       <h1>ให้คะแนนการแข่งขัน</h1>
       <p className="muted">
-        เฉพาะรายการที่ผู้จัดมอบหมายให้คุณ · เกณฑ์ตัวอย่าง
-        ต้องตรวจสอบกับผู้จัดก่อนใช้งานจริง
+        เฉพาะรายการที่ผู้จัดมอบหมายให้คุณ ·
+        ตรวจรุ่นเกณฑ์และเอกสารต้นฉบับก่อนให้คะแนน
       </p>
       <Message text={error} />
       {!rows.length ? (
@@ -1135,22 +1342,24 @@ function Judge({ notify }) {
           <h2>{selected.school}</h2>
           <p>{selected.title}</p>
           <form onSubmit={save}>
-            {[
-              "คุณภาพผลงาน",
-              "ความคิดสร้างสรรค์",
-              "กระบวนการทำงาน",
-              "การนำเสนอ",
-            ].map((title, i) => (
-              <Field
-                key={i}
-                label={title + " (เต็ม " + [40, 30, 20, 10][i] + ")"}
+            <p className="helper">{selected.rules_version}</p>
+            {selected.rules_source_url && (
+              <a
+                href={selected.rules_source_url}
+                target="_blank"
+                rel="noopener noreferrer"
               >
+                อ่านเกณฑ์ต้นฉบับ
+              </a>
+            )}
+            {selected.score_rules.map(({ label: title, max }, i) => (
+              <Field key={i} label={title + " (เต็ม " + max + ")"}>
                 <input
                   aria-label={title}
                   type="number"
                   step="0.01"
                   min="0"
-                  max={[40, 30, 20, 10][i]}
+                  max={max}
                   required
                   value={values[i]}
                   onChange={(e) =>
@@ -1161,6 +1370,25 @@ function Judge({ notify }) {
                 />
               </Field>
             ))}
+            <Field label="หักคะแนนตามข้อกำหนด (หน่วยคะแนนดิบ)">
+              <input
+                type="number"
+                min="0"
+                max={selected.score_rules.reduce((sum, x) => sum + x.max, 0)}
+                step="0.01"
+                required
+                value={deduction}
+                onChange={(e) => setDeduction(e.target.value)}
+              />
+            </Field>
+            <Field label="เหตุผลและข้อเกณฑ์ที่ใช้หักคะแนน">
+              <textarea
+                required={Number(deduction) > 0}
+                value={deductionReason}
+                onChange={(e) => setDeductionReason(e.target.value)}
+                maxLength={1000}
+              />
+            </Field>
             <Field label="ข้อเสนอแนะ">
               <textarea
                 value={comment}
@@ -1169,8 +1397,23 @@ function Judge({ notify }) {
               />
             </Field>
             <strong>
-              รวม {values.reduce((a, b) => a + Number(b || 0), 0).toFixed(2)} /
-              100
+              รวมหลังหัก{" "}
+              {Math.max(
+                0,
+                values.reduce((a, b) => a + Number(b || 0), 0) -
+                  Number(deduction || 0),
+              ).toFixed(2)}{" "}
+              / {selected.score_rules.reduce((sum, x) => sum + x.max, 0)}{" "}
+              คะแนนดิบ — คิดเป็นร้อยละ{" "}
+              {(
+                (Math.max(
+                  0,
+                  values.reduce((a, b) => a + Number(b || 0), 0) -
+                    Number(deduction || 0),
+                ) /
+                  selected.score_rules.reduce((sum, x) => sum + x.max, 0)) *
+                100
+              ).toFixed(2)}
             </strong>
             <div className="form-actions">
               <Button type="button" onClick={() => setSelected(null)}>
@@ -1286,7 +1529,7 @@ function Admin({ competitions, reload, notify }) {
                   .filter((c) => !c.published)
                   .map((c) => (
                     <option value={c.id} key={c.id}>
-                      {c.title}
+                      {c.title} · {c.grade}
                     </option>
                   ))}
               </select>
@@ -1383,6 +1626,18 @@ function Admin({ competitions, reload, notify }) {
                     <td>
                       <div className="row-actions">
                         <Button
+                          disabled={busy}
+                          onClick={() =>
+                            action(
+                              "/admin/competition-copy",
+                              { id: c.id },
+                              "สร้างรายการฉบับใหม่แล้ว ไปแก้ไขเกณฑ์ก่อนเปิดรับสมัคร",
+                            )
+                          }
+                        >
+                          สร้างฉบับใหม่
+                        </Button>
+                        <Button
                           disabled={c.published || busy}
                           onClick={() => setEditing({ ...c })}
                         >
@@ -1456,6 +1711,127 @@ function Admin({ competitions, reload, notify }) {
                   }
                 />
               </Field>
+              <h2>รุ่นเกณฑ์และจำนวนผู้สมัคร</h2>
+              <p className="helper">
+                เปลี่ยนได้ก่อนมีทีมยืนยันสมัครเท่านั้น
+                เมื่อมีผู้สมัครแล้วให้คงเกณฑ์เดิมสำหรับการแข่งขันนั้น
+              </p>
+              <Field label="ชื่อรุ่นเกณฑ์">
+                <input
+                  required
+                  value={editing.rules_version}
+                  onChange={(e) =>
+                    setEditing({ ...editing, rules_version: e.target.value })
+                  }
+                />
+              </Field>
+              <Field label="ลิงก์เอกสารต้นฉบับ (HTTPS)">
+                <input
+                  type="url"
+                  value={editing.rules_source_url}
+                  onChange={(e) =>
+                    setEditing({ ...editing, rules_source_url: e.target.value })
+                  }
+                />
+              </Field>
+              {[
+                ["min_students", "นักเรียนอย่างน้อย"],
+                ["max_students", "นักเรียนไม่เกิน"],
+                ["max_coaches", "ครูผู้ฝึกซ้อมไม่เกิน"],
+              ].map(([key, label]) => (
+                <Field key={key} label={label}>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    required
+                    value={editing[key]}
+                    onChange={(e) =>
+                      setEditing({ ...editing, [key]: Number(e.target.value) })
+                    }
+                  />
+                </Field>
+              ))}
+              <CompetitionPolicy
+                policy={editing.policy}
+                onChange={(policy) => setEditing({ ...editing, policy })}
+              />
+              <h2>
+                หัวข้อคะแนน (รวม {editing.policy?.score_total || 100} คะแนน)
+              </h2>
+              {editing.score_rules.map((rule, i) => (
+                <div className="form-actions" key={i}>
+                  <Field label={`หัวข้อ ${i + 1}`}>
+                    <input
+                      required
+                      maxLength={150}
+                      value={rule.label}
+                      onChange={(e) =>
+                        setEditing({
+                          ...editing,
+                          score_rules: editing.score_rules.map((x, j) =>
+                            j === i ? { ...x, label: e.target.value } : x,
+                          ),
+                        })
+                      }
+                    />
+                  </Field>
+                  <Field label="คะแนนเต็ม">
+                    <input
+                      type="number"
+                      min="0.01"
+                      max="100"
+                      step="0.01"
+                      required
+                      value={rule.max}
+                      onChange={(e) =>
+                        setEditing({
+                          ...editing,
+                          score_rules: editing.score_rules.map((x, j) =>
+                            j === i ? { ...x, max: Number(e.target.value) } : x,
+                          ),
+                        })
+                      }
+                    />
+                  </Field>
+                  <Button
+                    type="button"
+                    disabled={editing.score_rules.length <= 1}
+                    onClick={() =>
+                      setEditing({
+                        ...editing,
+                        score_rules: editing.score_rules.filter(
+                          (_, j) => j !== i,
+                        ),
+                      })
+                    }
+                  >
+                    ลบหัวข้อ
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                disabled={editing.score_rules.length >= 20}
+                onClick={() =>
+                  setEditing({
+                    ...editing,
+                    score_rules: [
+                      ...editing.score_rules,
+                      { label: "", max: 1 },
+                    ],
+                  })
+                }
+              >
+                เพิ่มหัวข้อคะแนน
+              </Button>
+              <p>
+                คะแนนเต็มรวม:{" "}
+                {editing.score_rules
+                  .reduce((sum, x) => sum + Number(x.max), 0)
+                  .toFixed(2)}{" "}
+                / {editing.policy?.score_total || 100}
+              </p>
               <label className="checkbox">
                 <input
                   type="checkbox"

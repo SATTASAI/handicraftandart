@@ -1509,3 +1509,53 @@ td select {
     font-size: 21px;
   }
 }
+
+.criteria-library {
+  margin: 0 0 20px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f5f9ff;
+}
+.criteria-library summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.criteria-library a {
+  color: var(--blue);
+  text-decoration: underline;
+}
+.criteria-library li {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+
+.policy-editor {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.policy-editor > label {
+  display: block;
+  margin: 12px 0;
+}
+.detail-description {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.person-row {
+  flex-wrap: wrap;
+}
+
+.operations-toolbar {
+  flex-wrap: wrap;
+}
+.operations-toolbar > label {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.operations-toolbar .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}

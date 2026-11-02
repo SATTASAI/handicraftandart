@@ -29,7 +29,9 @@ function exportRegistrations(rows) {
       r.title,
       r.school,
       r.status,
-      r.students.map((s) => `${s.name} (${s.grade})`).join(" / "),
+      r.students
+        .map((s) => `${s.name} (${s.age ? "อายุ " + s.age + " ปี" : s.grade})`)
+        .join(" / "),
       r.coaches.map((s) => s.name).join(" / "),
       r.contact_name,
       r.email,
@@ -72,6 +74,34 @@ export default function AdminOperations({ data, refresh, notify }) {
       setBusy(false);
     }
   }
+  async function decision(row, value) {
+    const note =
+      value === "disqualified"
+        ? prompt("ระบุเหตุผลและข้อเกณฑ์ที่ใช้ตัดสิทธิ์")
+        : "ผู้จัดตรวจเอกสาร คุณสมบัติ และคุณวุฒิกรรมการตามเกณฑ์แล้ว";
+    if (
+      !note ||
+      !confirm(
+        `ยืนยันผลตรวจคุณสมบัติ ${row.school}: ${value === "eligible" ? "ผ่าน" : "ตัดสิทธิ์"}?`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError("");
+    try {
+      await api("/admin/decision", {
+        registration_id: row.id,
+        decision: value,
+        note,
+      });
+      notify("บันทึกผลตรวจแล้ว");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      await refresh();
+      setBusy(false);
+    }
+  }
   return (
     <>
       <h2>ความพร้อมของระบบ</h2>
@@ -88,6 +118,10 @@ export default function AdminOperations({ data, refresh, notify }) {
           : "ยังไม่ตั้งค่า Resend / โดเมนส่งอีเมล"}
       </p>
       <h2>ความคืบหน้าการตัดสิน</h2>
+      <p className="helper">
+        แสดงรายการที่มีทีมยืนยันแล้ว
+        นับเฉพาะกรรมการที่ไม่มีส่วนได้เสียกับแต่ละทีม
+      </p>
       <div className="table-scroll">
         <table>
           <thead>
@@ -100,23 +134,25 @@ export default function AdminOperations({ data, refresh, notify }) {
             </tr>
           </thead>
           <tbody>
-            {data.competitions.map((c) => (
-              <tr key={c.id}>
-                <td>{c.title}</td>
-                <td>{c.teams}</td>
-                <td>{c.judges}</td>
-                <td>
-                  {c.scored} / {c.teams * c.judges}
-                </td>
-                <td>
-                  {c.published
-                    ? "ประกาศผลแล้ว"
-                    : c.teams && c.judges && c.scored === c.teams * c.judges
-                      ? "คะแนนครบ พร้อมให้ผู้จัดตรวจสอบ"
-                      : "รอผู้สมัคร / กรรมการ / คะแนน"}
-                </td>
-              </tr>
-            ))}
+            {data.competitions
+              .filter((c) => c.teams > 0)
+              .map((c) => (
+                <tr key={c.id}>
+                  <td>{c.title}</td>
+                  <td>{c.teams}</td>
+                  <td>{c.judges}</td>
+                  <td>
+                    {c.scored} / {c.required}
+                  </td>
+                  <td>
+                    {c.published
+                      ? "ประกาศผลแล้ว"
+                      : c.ready
+                        ? "พร้อมประกาศผล"
+                        : `รอตรวจคุณสมบัติ ${c.unreviewed} ทีม / กรรมการไม่ครบเกณฑ์ ${c.invalid_judges} ทีม / คะแนนที่ขาด ${Math.max(0, c.required - c.scored)}`}
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
       </div>
@@ -126,7 +162,7 @@ export default function AdminOperations({ data, refresh, notify }) {
         การส่งสำเร็จหมายถึงผู้ให้บริการรับอีเมลแล้ว โปรดตรวจสถานะการส่งถึงใน
         Resend
       </p>
-      <div className="form-actions">
+      <div className="form-actions operations-toolbar">
         <label>
           กรองรายการ{" "}
           <select
@@ -181,8 +217,12 @@ export default function AdminOperations({ data, refresh, notify }) {
                   </td>
                   <td>
                     นักเรียน:{" "}
-                    {r.students.map((s) => `${s.name} ${s.grade}`).join(", ") ||
-                      "—"}
+                    {r.students
+                      .map(
+                        (s) =>
+                          `${s.name} ${s.age ? "อายุ " + s.age + " ปี" : s.grade}`,
+                      )
+                      .join(", ") || "—"}
                     <br />
                     ครู: {r.coaches.map((s) => s.name).join(", ") || "—"}
                   </td>
@@ -192,7 +232,32 @@ export default function AdminOperations({ data, refresh, notify }) {
                     {r.email}
                   </td>
                   <td>
-                    {r.status === "submitted" ? "ยืนยันแล้ว" : "ฉบับร่าง"}
+                    {r.status === "submitted"
+                      ? r.eligibility_reviewed
+                        ? r.decision === "disqualified"
+                          ? "ตัดสิทธิ์"
+                          : "ตรวจคุณสมบัติแล้ว"
+                        : "รอผู้จัดตรวจคุณสมบัติ"
+                      : "ฉบับร่าง"}
+                    {r.decision_note && <p>{r.decision_note}</p>}
+                    {r.status === "submitted" && !r.published && (
+                      <div className="row-actions">
+                        <button
+                          className="btn"
+                          disabled={busy}
+                          onClick={() => decision(r, "eligible")}
+                        >
+                          ยืนยันคุณสมบัติผ่าน
+                        </button>
+                        <button
+                          className="btn"
+                          disabled={busy}
+                          onClick={() => decision(r, "disqualified")}
+                        >
+                          ตัดสิทธิ์ตามเกณฑ์
+                        </button>
+                      </div>
+                    )}
                   </td>
                   <td>
                     {mailStatus[r.email_status] || "ยังไม่ส่ง"}
@@ -211,6 +276,7 @@ export default function AdminOperations({ data, refresh, notify }) {
                       disabled={
                         busy ||
                         !r.published ||
+                        r.decision === "disqualified" ||
                         r.status !== "submitted" ||
                         r.email_status === "sent" ||
                         !data.readiness.email
