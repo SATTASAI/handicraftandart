@@ -46,13 +46,13 @@ Vite โหลด Worker และ D1 จำลองผ่าน Miniflare ใ�
 ### ตั้งค่า Cloudflare จริง
 
 1. เชื่อมบัญชี Cloudflare ด้วย `npx wrangler login` หรือใช้ API token จาก secret store ของระบบ build
-2. สร้าง D1:
+2. ใช้ D1 ที่มีอยู่แล้วชื่อ `handicraftart` และตรวจสอบ UUID:
 
 ```sh
-npx wrangler d1 create handicraftandart
+npx wrangler d1 info handicraftart
 ```
 
-3. นำ `database_id` จริงจากคำสั่งไปแทน UUID ตัวอย่างใน `wrangler.jsonc` โดยคง binding ชื่อ `DB`
+3. นำ UUID ของฐานข้อมูล `handicraftart` จากคำสั่งไปแทน UUID ตัวอย่างใน `wrangler.jsonc` โดยคง binding ชื่อ `DB`
 4. กำหนด `SITE_URL` เป็น URL HTTPS จริงของเว็บ (เช่น Worker URL หรือ custom domain), `MAIL_FROM` เป็นชื่อ/อีเมลบนโดเมนที่ยืนยันใน Resend
 5. ตั้งค่า secrets ผ่าน prompt ของ Wrangler ห้ามใส่ค่า secret ในโค้ดหรือ `VITE_*`:
 
@@ -75,7 +75,7 @@ npm run deploy
 สมัครบัญชีผ่านหน้าเว็บก่อน แล้วผู้ที่มีสิทธิ์ Cloudflare รันคำสั่งต่อไปนี้ โดยเปลี่ยนอีเมลตัวอย่างเป็นบัญชีผู้ดูแลจริง:
 
 ```sh
-npx wrangler d1 execute handicraftandart --remote --command "UPDATE users SET role='admin' WHERE email='admin@example.com';"
+npx wrangler d1 execute handicraftart --remote --command "UPDATE users SET role='admin' WHERE email='admin@example.com';"
 ```
 
 รีโหลดหน้าเว็บ สิทธิ์ตรวจจากฐานข้อมูลทุกคำขอ ผู้ใช้ใหม่ทุกคนเริ่มเป็นผู้เข้าร่วม ไม่มีการยกสิทธิ์ผู้สมัครคนแรกอัตโนมัติ หลังจากนั้นกำหนดกรรมการ/ผู้ดูแลผ่านเมนูจัดการสิทธิ์ได้
