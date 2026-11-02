@@ -15,6 +15,8 @@ export async function api(path, data) {
   } catch {
     throw new Error("เชื่อมต่อระบบไม่ได้ โปรดลองใหม่");
   }
+  if (r.status === 401 && !path.startsWith("/auth/"))
+    window.dispatchEvent(new Event("auth-expired"));
   if (!r.ok) throw new Error(result.error || "ทำรายการไม่สำเร็จ");
   return result;
 }

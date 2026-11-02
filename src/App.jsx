@@ -47,8 +47,8 @@ const nav = [
   ["/results", "ผลการแข่งขัน", ChartBar],
   ["/certificates", "ประกาศนียบัตร", Certificate],
 ];
-function go(path) {
-  history.pushState({}, "", path);
+function go(path, replace = false) {
+  history[replace ? "replaceState" : "pushState"]({}, "", path);
   window.dispatchEvent(new PopStateEvent("popstate"));
   window.scrollTo(0, 0);
 }
@@ -123,30 +123,22 @@ function AuthPage({ mode, setMode, onClose, onUser }) {
     <section className="auth-page" aria-label="บัญชีผู้ใช้งาน">
       <div className="auth-intro">
         <span className="badge blue">ศิลปหัตถกรรมนักเรียน</span>
-        <h1>
-          ทุกความสามารถ
-          <br />
-          เริ่มต้นที่นี่
+        <h1 className="auth-welcome">
+          ยินดีต้อนรับ
+          <span className="auth-welcome-system">
+            สู่ระบบการแข่งขันศิลปหัตถกรรม
+          </span>
+          <span className="auth-welcome-network">
+            ศูนย์เครือข่ายสองพี่น้อง
+            <br />
+            ห้วยแม่เพรียง ป่าเด็ง
+          </span>
         </h1>
         <p>
           ร่วมสร้างเวทีแห่งการเรียนรู้และความคิดสร้างสรรค์
           <br />
           สำหรับนักเรียน ครูผู้ฝึกซ้อม และกรรมการ
         </p>
-        <div className="auth-intro-brand">
-          <Buildings size={28} />
-          <span>{BRAND}</span>
-        </div>
-        <a
-          href="/"
-          onClick={(e) => {
-            e.preventDefault();
-            go("/");
-          }}
-        >
-          <ArrowLeft size={18} />
-          กลับหน้าแรก
-        </a>
       </div>
       <div className="auth-card dialog-inner">
         <div className="auth-mark">
@@ -157,7 +149,7 @@ function AuthPage({ mode, setMode, onClose, onUser }) {
             ? "สมัครสมาชิก"
             : mode === "forgot"
               ? "ลืมรหัสผ่าน"
-              : "ยินดีต้อนรับกลับ"}
+              : "เข้าสู่ระบบ"}
         </h2>
         <p className="muted">
           {mode === "register"
@@ -1500,15 +1492,14 @@ export function App() {
     [dataError, setDataError] = useState(""),
     [results, setResults] = useState([]);
   const toastTimer = useRef();
-  const authReturn = useRef("/registrations");
+  const authReturn = useRef("/");
   const authMode = {
     "/login": "login",
     "/signup": "register",
     "/forgot-password": "forgot",
   }[path];
   function setAuthMode(mode) {
-    if (!authMode && path !== "/reset-password")
-      authReturn.current = protectedPage ? path : "/registrations";
+    if (!authMode && path !== "/reset-password") authReturn.current = path;
     go(
       { login: "/login", register: "/signup", forgot: "/forgot-password" }[
         mode
@@ -1530,7 +1521,6 @@ export function App() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   useEffect(() => {
-    reload();
     api("/auth/me")
       .then((r) => setUser(r.user))
       .catch((e) => setError(e.message))
@@ -1540,12 +1530,32 @@ export function App() {
       setMenu(false);
       setDataError("");
     };
+    const expired = () => setUser(null);
+    window.addEventListener("auth-expired", expired);
     window.addEventListener("popstate", f);
     return () => {
+      window.removeEventListener("auth-expired", expired);
       window.removeEventListener("popstate", f);
       clearTimeout(toastTimer.current);
     };
   }, []);
+  useEffect(() => {
+    if (!authReady) return;
+    if (!user && !authMode && path !== "/reset-password") {
+      authReturn.current = path;
+      go("/login", true);
+    }
+  }, [authReady, user, path, authMode]);
+  useEffect(() => {
+    if (user) {
+      setLoading(true);
+      reload();
+    } else {
+      setCompetitions([]);
+      setResults([]);
+      setDemo(false);
+    }
+  }, [user]);
   useEffect(() => {
     if (!user) {
       setRegistrations([]);
@@ -1568,11 +1578,11 @@ export function App() {
     };
   }, [user, path]);
   useEffect(() => {
-    if (path === "/results")
+    if (user && path === "/results")
       api("/results")
         .then((r) => setResults(r.results))
         .catch((e) => setDataError(e.message));
-  }, [path]);
+  }, [path, user]);
   function register(c) {
     if (!user) {
       authReturn.current = "/register/" + c.id;
@@ -1581,13 +1591,11 @@ export function App() {
     }
     go("/register/" + c.id);
   }
-  const protectedPage =
-    ["/registrations", "/certificates", "/judge", "/admin"].includes(path) ||
-    path.startsWith("/register/");
   const eventId = path.split("/")[2],
     c = competitions.find((x) => x.id === eventId);
   let content;
-  if (authMode)
+  if (!authReady) content = <p role="status">กำลังตรวจสอบบัญชี…</p>;
+  else if (authMode)
     content = (
       <AuthPage
         key={authMode}
@@ -1599,21 +1607,7 @@ export function App() {
     );
   else if (path === "/reset-password")
     content = <ResetPassword openLogin={() => setAuthMode("login")} />;
-  else if (protectedPage && !authReady) content = <p>กำลังตรวจสอบบัญชี…</p>;
-  else if (protectedPage && !user)
-    content = (
-      <>
-        <Empty icon={LockKey} title="เข้าสู่ระบบเพื่อดำเนินการต่อ">
-          สำหรับครูผู้ประสานงาน กรรมการ และผู้ดูแลระบบ
-        </Empty>
-        <div className="center-actions">
-          <Button variant="primary" onClick={() => setAuthMode("login")}>
-            เข้าสู่ระบบ
-          </Button>
-          <Button onClick={() => setAuthMode("register")}>สมัครสมาชิก</Button>
-        </div>
-      </>
-    );
+  else if (!user) content = null;
   else if (path === "/registrations")
     content = (
       <Registrations
@@ -1685,7 +1679,7 @@ export function App() {
       </Empty>
     );
   return (
-    <div className="app">
+    <div className={"app" + (!user ? " auth-shell" : "")}>
       <a className="skip-link" href="#main">
         ข้ามไปเนื้อหา
       </a>
@@ -1702,15 +1696,17 @@ export function App() {
           <span>{BRAND}</span>
         </div>
         <div className="account-area">
-          <button
-            className="mobile-menu icon-button"
-            aria-expanded={menu}
-            aria-controls="site-sidebar"
-            aria-label="เปิดเมนู"
-            onClick={() => setMenu(!menu)}
-          >
-            <List size={25} />
-          </button>
+          {user && (
+            <button
+              className="mobile-menu icon-button"
+              aria-expanded={menu}
+              aria-controls="site-sidebar"
+              aria-label="เปิดเมนู"
+              onClick={() => setMenu(!menu)}
+            >
+              <List size={25} />
+            </button>
+          )}
           {user ? (
             <details className="account-menu">
               <summary>
@@ -1731,7 +1727,8 @@ export function App() {
                     try {
                       await api("/auth/logout", {});
                       setUser(null);
-                      go("/");
+                      authReturn.current = "/";
+                      go("/login", true);
                       notify("ออกจากระบบแล้ว");
                     } catch (e) {
                       notify(e.message, true);
@@ -1743,88 +1740,86 @@ export function App() {
                 </button>
               </div>
             </details>
-          ) : (
-            <Button onClick={() => setAuthMode("login")}>
-              <UserCircle size={23} /> เข้าสู่ระบบ
-            </Button>
-          )}
+          ) : null}
         </div>
       </header>
-      {menu && (
+      {user && menu && (
         <button
           className="menu-overlay"
           aria-label="ปิดเมนู"
           onClick={() => setMenu(false)}
         />
       )}
-      <aside id="site-sidebar" className={"sidebar " + (menu ? "open" : "")}>
-        <button
-          className="sidebar-close icon-button"
-          aria-label="ปิดแถบเมนู"
-          onClick={() => setMenu(false)}
-        >
-          <X size={24} />
-        </button>
-        <nav aria-label="เมนูหลัก">
-          {nav.map(([url, label, Icon]) => (
-            <a
-              className={
-                path === url ||
-                (url === "/competitions" &&
-                  path.startsWith("/competitions/")) ||
-                (url === "/registrations" && path.startsWith("/register/"))
-                  ? "active"
-                  : ""
-              }
-              key={url}
-              href={url}
-              onClick={(e) => {
-                e.preventDefault();
-                go(url);
-              }}
-            >
-              <Icon size={25} weight="regular" />
-              <span>{label}</span>
-            </a>
-          ))}
-          {user && ["judge", "admin"].includes(user.role) && (
-            <>
-              <div className="nav-divider" />
-              <p className="nav-label">สำหรับผู้ดูแล</p>
+      {user && (
+        <aside id="site-sidebar" className={"sidebar " + (menu ? "open" : "")}>
+          <button
+            className="sidebar-close icon-button"
+            aria-label="ปิดแถบเมนู"
+            onClick={() => setMenu(false)}
+          >
+            <X size={24} />
+          </button>
+          <nav aria-label="เมนูหลัก">
+            {nav.map(([url, label, Icon]) => (
               <a
-                href="/judge"
-                className={path === "/judge" ? "active" : ""}
+                className={
+                  path === url ||
+                  (url === "/competitions" &&
+                    path.startsWith("/competitions/")) ||
+                  (url === "/registrations" && path.startsWith("/register/"))
+                    ? "active"
+                    : ""
+                }
+                key={url}
+                href={url}
                 onClick={(e) => {
                   e.preventDefault();
-                  go("/judge");
+                  go(url);
                 }}
               >
-                <Star size={26} />
-                ให้คะแนน
+                <Icon size={25} weight="regular" />
+                <span>{label}</span>
               </a>
-              {user.role === "admin" && (
+            ))}
+            {user && ["judge", "admin"].includes(user.role) && (
+              <>
+                <div className="nav-divider" />
+                <p className="nav-label">สำหรับผู้ดูแล</p>
                 <a
-                  href="/admin"
-                  className={path === "/admin" ? "active" : ""}
+                  href="/judge"
+                  className={path === "/judge" ? "active" : ""}
                   onClick={(e) => {
                     e.preventDefault();
-                    go("/admin");
+                    go("/judge");
                   }}
                 >
-                  <Users size={26} />
-                  จัดการสิทธิ์
+                  <Star size={26} />
+                  ให้คะแนน
                 </a>
-              )}
-            </>
-          )}
-        </nav>
-        <div className="sidebar-footer">
-          <span>ศิลปหัตถกรรมนักเรียน</span>
-          <small>สองพี่น้อง · ห้วยแม่เพรียง · ป่าเด็ง</small>
-        </div>
-      </aside>
+                {user.role === "admin" && (
+                  <a
+                    href="/admin"
+                    className={path === "/admin" ? "active" : ""}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      go("/admin");
+                    }}
+                  >
+                    <Users size={26} />
+                    จัดการสิทธิ์
+                  </a>
+                )}
+              </>
+            )}
+          </nav>
+          <div className="sidebar-footer">
+            <span>ศิลปหัตถกรรมนักเรียน</span>
+            <small>สองพี่น้อง · ห้วยแม่เพรียง · ป่าเด็ง</small>
+          </div>
+        </aside>
+      )}
       <main id="main" className="main">
-        {demo && !authMode && (
+        {user && demo && !authMode && (
           <div className="demo-note">
             <span className="badge blue">ข้อมูลตัวอย่าง</span>
             <span>เกณฑ์และกำหนดการแข่งขันรอผู้จัดยืนยัน</span>

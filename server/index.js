@@ -113,22 +113,26 @@ async function api(r, env) {
     return json({
       ok: true,
       adminSetupComplete: Boolean(setup),
-      release: "applicant-roles-2026-11-02",
+      release: "login-required-2026-11-02",
     });
   }
-  if (path === "/api/competitions" && method === "GET")
+  if (path === "/api/competitions" && method === "GET") {
+    auth(await sessionUser(r, env));
     return json({
       competitions: (
         await env.DB.prepare("SELECT * FROM competitions ORDER BY rowid").all()
       ).results,
       demo: env.DEMO_MODE !== "false",
     });
+  }
   if (path === "/api/auth/me" && method === "GET")
     return json({ user: publicUser(await sessionUser(r, env)) });
-  if (path === "/api/results" && method === "GET")
+  if (path === "/api/results" && method === "GET") {
+    auth(await sessionUser(r, env));
     return json({
       results: await results(env, url.searchParams.get("competition")),
     });
+  }
   const ip = r.headers.get("CF-Connecting-IP") || "local";
   if (path === "/api/auth/register" && method === "POST") {
     requireSecret(env);

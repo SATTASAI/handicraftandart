@@ -60,8 +60,22 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
       cookie: r.headers.get("set-cookie")?.split(";")[0],
     };
   }
-  const list = await call("/competitions");
-  assert.equal(list.body.competitions.length, 6);
+  for (const path of [
+    "/competitions",
+    "/results",
+    "/registrations",
+    "/admin/users",
+    "/judge/registrations",
+  ]) {
+    const denied = await call(path);
+    assert.equal(denied.status, 401);
+    assert(!denied.body.competitions && !denied.body.results);
+  }
+  assert.equal(
+    (await call("/competitions", undefined, "handicraft_session=invalid"))
+      .status,
+    401,
+  );
   assert.equal((await call("/registrations")).status, 401);
   assert.equal(
     (
@@ -106,6 +120,9 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
     "coach",
   );
   assert(teacher.cookie);
+  const list = await call("/competitions", undefined, teacher.cookie);
+  assert.equal(list.status, 200);
+  assert.equal(list.body.competitions.length, 6);
   assert.equal(
     (await call("/auth/me", undefined, teacher.cookie)).body.user.school,
     "โรงเรียนทดสอบ",
@@ -249,13 +266,19 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
     ).body.total,
     89,
   );
-  assert.equal((await call("/results")).body.results.length, 0);
+  assert.equal(
+    (await call("/results", undefined, teacher.cookie)).body.results.length,
+    0,
+  );
   assert.equal(
     (await call("/admin/publish", { competition_id: "painting" }, admin.cookie))
       .status,
     200,
   );
-  assert.equal((await call("/results")).body.results[0].score, 89);
+  assert.equal(
+    (await call("/results", undefined, teacher.cookie)).body.results[0].score,
+    89,
+  );
   const cert = await call(
     "/certificates/" + reg.body.id,
     undefined,
@@ -338,4 +361,14 @@ test("real Workers/D1 flow: signup school, authorization, scores, publication, c
     (await call("/auth/me", undefined, newSession.cookie)).body.user,
     null,
   );
+  assert.equal(
+    (await call("/competitions", undefined, judge.cookie)).status,
+    200,
+  );
+  await db.prepare("UPDATE sessions SET expires_at=0").run();
+  assert.equal(
+    (await call("/competitions", undefined, judge.cookie)).status,
+    401,
+  );
+  assert.equal((await call("/results", undefined, judge.cookie)).status, 401);
 });

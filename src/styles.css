@@ -1475,3 +1475,37 @@ td select {
     padding: 24px;
   }
 }
+
+.auth-shell .main {
+  margin-left: 0;
+  width: 100%;
+}
+.auth-shell .auth-page {
+  min-height: min(650px, 75vh);
+}
+.auth-welcome-system {
+  display: block;
+  font-size: clamp(22px, 2.1vw, 29px);
+  margin-top: 8px;
+  line-height: 1.7;
+}
+.auth-welcome-network {
+  display: block;
+  font-size: 21px;
+  font-weight: 500;
+  margin-top: 18px;
+  line-height: 1.8;
+  color: var(--blue);
+}
+@media (max-width: 900px) {
+  .auth-welcome-network {
+    font-size: 17px;
+    margin-top: 10px;
+  }
+  .auth-intro .auth-welcome-network br {
+    display: initial;
+  }
+  .auth-welcome-system {
+    font-size: 21px;
+  }
+}

@@ -16,3 +16,5 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Target hosting is Cloudflare Workers + D1; password reset provider is Resend. School is required on teacher registration and persisted server-side.
 - Keep synthetic local accounts and deployment secrets out of git. New accounts must never become administrators automatically.
 - Authentication uses full pages at /login, /signup, and /forgot-password in the accepted blue/white layout. Signup collects exactly one requested role (judge or coach); admins assign actual permissions separately. Admin user lists show applicant details.
+- All competition pages require login, including home, competition listings/details, and results. Anonymous visitors go to /login; only signup, forgot-password, and reset-password remain available. Hide the main navigation before login and omit any back-to-home link from auth pages. Protect competition and results APIs as well.
+- Login's left welcome heading reads: ยินดีต้อนรับ สู่ระบบการแข่งขันศิลปหัตถกรรม ศูนย์เครือข่ายสองพี่น้อง ห้วยแม่เพรียง ป่าเด็ง. The form heading is เข้าสู่ระบบ.
