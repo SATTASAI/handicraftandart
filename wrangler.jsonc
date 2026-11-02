@@ -12,8 +12,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "handicraftart",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_name": "handicraftandart",
+      "database_id": "5f721e5a-f1c7-4b9a-bfea-e9a0c39ea333",
       "migrations_dir": "migrations",
     },
   ],
