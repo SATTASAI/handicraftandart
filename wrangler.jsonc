@@ -17,6 +17,6 @@
       "migrations_dir": "migrations",
     },
   ],
-  "vars": { "SITE_URL": "https://handicraftandart.banpadengschool.ac.th", "MAIL_FROM": "", "DEMO_MODE": "true" },
+  "vars": { "SITE_URL": "https://handicraftandart.banpadengschool.ac.th", "MAIL_FROM": "ศิลปหัตถกรรม <support@mail.banpadengschool.ac.th>", "DEMO_MODE": "true" },
   "observability": { "enabled": true },
 }
