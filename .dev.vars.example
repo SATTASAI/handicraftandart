@@ -1,0 +1,6 @@
+# Copy to .dev.vars and generate your own value: openssl rand -hex 32
+AUTH_SECRET=replace-with-random-secret-at-least-32-characters
+# Set these only after verifying your sending domain with Resend.
+RESEND_API_KEY=
+MAIL_FROM=
+SITE_URL=http://localhost:8787

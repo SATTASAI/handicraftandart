@@ -1,0 +1,12 @@
+PRAGMA foreign_keys=ON;
+CREATE TABLE users(id TEXT PRIMARY KEY,email TEXT NOT NULL UNIQUE,name TEXT NOT NULL,school TEXT NOT NULL,password_hash TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'participant' CHECK(role IN ('participant','judge','admin')),created_at INTEGER NOT NULL);
+CREATE TABLE sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,expires_at INTEGER NOT NULL);
+CREATE TABLE resets(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,expires_at INTEGER NOT NULL);
+CREATE TABLE throttle(key TEXT PRIMARY KEY,count INTEGER NOT NULL,expires_at INTEGER NOT NULL);
+CREATE TABLE competitions(id TEXT PRIMARY KEY,title TEXT NOT NULL,category TEXT NOT NULL,grade TEXT NOT NULL,cover TEXT NOT NULL,description TEXT NOT NULL,venue TEXT NOT NULL DEFAULT 'รอประกาศ',schedule TEXT NOT NULL DEFAULT 'รอประกาศ',max_students INTEGER NOT NULL, max_coaches INTEGER NOT NULL DEFAULT 2,registration_open INTEGER NOT NULL DEFAULT 1,published INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE registrations(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),competition_id TEXT NOT NULL REFERENCES competitions(id),school TEXT NOT NULL,students TEXT NOT NULL,coaches TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'submitted' CHECK(status IN ('draft','submitted')),created_at INTEGER NOT NULL,UNIQUE(user_id,competition_id));
+CREATE TABLE assignments(competition_id TEXT NOT NULL REFERENCES competitions(id),judge_id TEXT NOT NULL REFERENCES users(id),PRIMARY KEY(competition_id,judge_id));
+CREATE TABLE scores(registration_id TEXT NOT NULL REFERENCES registrations(id),judge_id TEXT NOT NULL REFERENCES users(id),criteria TEXT NOT NULL,total REAL NOT NULL CHECK(total>=0 AND total<=100),comment TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL,PRIMARY KEY(registration_id,judge_id));
+CREATE INDEX sessions_expiry ON sessions(expires_at);
+CREATE INDEX registrations_competition ON registrations(competition_id,status);
+CREATE INDEX resets_user ON resets(user_id);
