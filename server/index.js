@@ -1,4 +1,5 @@
 import { registrationsApi } from "./registrations.js";
+import { judgingApi } from "./judging.js";
 import {
   now,
   random,
@@ -106,7 +107,8 @@ async function api(r, env) {
     await db.prepare("SELECT id FROM account_bootstrap LIMIT 1").first();
     await db.prepare("SELECT id FROM event_competitions LIMIT 1").first();
     await db.prepare("SELECT is_organizer FROM account_users LIMIT 1").first();
-    return json({ ok: true, release: "registration-v1" });
+    await db.prepare("SELECT judge_id FROM event_scores LIMIT 1").first();
+    return json({ ok: true, release: "judging-v1" });
   }
   if (path === "/api/setup" && r.method === "GET")
     return json({
@@ -244,6 +246,19 @@ async function api(r, env) {
     const user = await currentUser(r, db);
     if (!user) fail(401, "กรุณาเข้าสู่ระบบ");
     return registrationsApi(r, env, user, { body, json, fail, limit });
+  }
+  if (
+    path === "/api/admin/judges" ||
+    path === "/api/judging" ||
+    path.startsWith("/api/judging/") ||
+    path === "/api/results" ||
+    path.startsWith("/api/results/") ||
+    path === "/api/certificates" ||
+    path === "/api/certificate-settings"
+  ) {
+    const user = await currentUser(r, db);
+    if (!user) fail(401, "กรุณาเข้าสู่ระบบ");
+    return judgingApi(r, env, user, { body, json, fail });
   }
   if (path === "/api/admin/users" && r.method === "GET") {
     const user = await currentUser(r, db);

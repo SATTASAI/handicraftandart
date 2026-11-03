@@ -12,6 +12,7 @@ async function runtime(t) {
         { type: "ESModule", path: "server/security.js" },
         { type: "ESModule", path: "server/registrations.js" },
         { type: "ESModule", path: "server/catalog.js" },
+        { type: "ESModule", path: "server/judging.js" },
       ],
       compatibilityDate: "2026-11-02",
       d1Databases: ["DB"],
@@ -57,7 +58,7 @@ const account = (
 
 test("signup both roles, first-account superadmin, secure sessions, login/logout and authorization", async (t) => {
   const { db, request } = await runtime(t);
-  assert.equal((await request("/health")).body.release, "registration-v1");
+  assert.equal((await request("/health")).body.release, "judging-v1");
   assert.equal((await request("/setup")).body.firstAccountAvailable, true);
   const first = await request("/signup", account());
   assert.equal(first.status, 201, JSON.stringify(first.body));
