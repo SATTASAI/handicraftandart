@@ -112,6 +112,19 @@ test("judge assignment, scoring, ranking, medals, results and certificates", asy
     return s.body.registration.id;
   };
   const teamA = await team(coachA, "เอ"), teamB = await team(coachB, "บี");
+  // Same student cannot be entered twice in one competition, even by another coach.
+  const dupe = await request(
+    "/registrations",
+    { competition_id, request_id: crypto.randomUUID(), students: [student(await upload(coachB.cookie), "เอ")] },
+    coachB.cookie,
+  );
+  assert.equal(dupe.status, 409, JSON.stringify(dupe.body));
+  const late = await request(
+    "/registrations",
+    { competition_id, request_id: crypto.randomUUID(), students: [student(await upload(coachA.cookie), "ซี")] },
+    coachA.cookie,
+  );
+  assert.equal(late.status, 201);
   // Only superadmin assigns; only judge-role accounts may be assigned.
   assert.equal((await request("/admin/judges", { competition_id, judge_id: judge.body.user.id, assigned: true }, coachB.cookie)).status, 403);
   assert.equal((await request("/admin/judges", { competition_id, judge_id: plain.body.user.id, assigned: true }, admin.cookie)).status, 400);
@@ -129,6 +142,9 @@ test("judge assignment, scoring, ranking, medals, results and certificates", asy
   assert.equal((await score(coachB, teamB, 99)).status, 409, "no self-judging");
   assert.equal((await score(judge, teamA, 101)).status, 400);
   assert.equal((await score(judge, teamA, 70)).status, 200);
+  // Once scoring starts, no new teams or approvals (published results must not shift).
+  assert.equal((await request("/admin/registrations/" + late.body.registration.id + "/review", { revision: 1, status: "approved" }, admin.cookie)).status, 409);
+  assert.equal((await request("/registrations", { competition_id, request_id: crypto.randomUUID(), students: [student(await upload(coachA.cookie), "ดี")] }, coachA.cookie)).status, 409);
   // Partial results hidden from non-reviewers.
   assert.equal((await request("/results/" + competition_id, undefined, coachA.cookie)).status, 404);
   assert.equal((await request("/results", undefined, coachA.cookie)).body.competitions.length, 0);

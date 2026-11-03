@@ -223,7 +223,9 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
   }
 
   // --- Judge scoring ---
+  const isJudge = superadmin || Boolean(user.is_judge);
   if (path === "/api/judging" && method === "GET") {
+    if (!isJudge) fail(403, "เฉพาะกรรมการเท่านั้น");
     const rows = (
       await db
         .prepare(
@@ -238,6 +240,7 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
   }
   const judgeMatch = path.match(/^\/api\/judging\/([a-zA-Z0-9-]+)(\/scores)?$/);
   if (judgeMatch) {
+    if (!isJudge) fail(403, "เฉพาะกรรมการเท่านั้น");
     const c = await competition(judgeMatch[1]);
     if (
       !(await db

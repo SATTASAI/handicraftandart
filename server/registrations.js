@@ -484,6 +484,37 @@ export async function registrationsApi(
         return json({ registration: await details(db, duplicate.id) }, 200);
       }
     }
+    const personKey = (x) =>
+      [x.first_name, x.last_name, x.school]
+        .map((v) => String(v).normalize("NFC").replace(/\s+/g, " ").trim())
+        .join("|");
+    if (new Set(students.map(personKey)).size !== students.length)
+      fail(400, "มีชื่อนักเรียนซ้ำกันในทีม");
+    const taken = new Set(
+      (
+        await db
+          .prepare(
+            "SELECT s.first_name,s.last_name,s.school FROM event_students s JOIN event_registrations r ON r.id=s.registration_id WHERE r.competition_id=? AND r.id<>?",
+          )
+          .bind(competitionId, existing?.id || "")
+          .all()
+      ).results.map(personKey),
+    );
+    const dup = students.find((x) => taken.has(personKey(x)));
+    if (dup)
+      fail(
+        409,
+        `${dup.first_name} ${dup.last_name} ลงทะเบียนในรายการนี้แล้ว (อาจเป็นทีมอื่นหรือครูท่านอื่น)`,
+      );
+    if (
+      await db
+        .prepare(
+          "SELECT 1 FROM event_scores s JOIN event_registrations r ON r.id=s.registration_id WHERE r.competition_id=? LIMIT 1",
+        )
+        .bind(competitionId)
+        .first()
+    )
+      fail(409, "รายการนี้เริ่มตัดสินแล้ว ไม่รับสมัครหรือแก้ไขทีมเพิ่ม");
     const validDocuments = await db
       .prepare(
         "SELECT COUNT(*) AS total FROM json_each(?) j JOIN registration_documents d ON d.id=json_extract(j.value,'$.document_id') WHERE d.owner_id=? AND NOT EXISTS(SELECT 1 FROM event_students s WHERE s.document_id=d.id AND s.registration_id<>?)",
@@ -605,6 +636,19 @@ export async function registrationsApi(
       fail(400, "เลือกผลตรวจและระบุเหตุผลเมื่อขอแก้ไข");
     const id = reviewMatch[1],
       t = now();
+    if (
+      b.status === "approved" &&
+      (await db
+        .prepare(
+          "SELECT 1 FROM event_scores s JOIN event_registrations r ON r.id=s.registration_id JOIN event_registrations x ON x.competition_id=r.competition_id WHERE x.id=? LIMIT 1",
+        )
+        .bind(id)
+        .first())
+    )
+      fail(
+        409,
+        "รายการนี้เริ่มตัดสินแล้ว ยืนยันทีมเพิ่มไม่ได้ (ผลที่ประกาศแล้วจะเปลี่ยน)",
+      );
     const results = await db.batch([
       db
         .prepare(
