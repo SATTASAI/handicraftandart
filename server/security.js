@@ -45,9 +45,17 @@ export function publicUser(user) {
         roles: [
           ...(user.is_coach ? ["coach"] : []),
           ...(user.is_judge ? ["judge"] : []),
+          ...(user.is_organizer ? ["organizer"] : []),
         ],
         is_superadmin: Boolean(user.is_superadmin),
-        permissions: user.is_superadmin ? ["*"] : ["account:self"],
+        is_organizer: Boolean(user.is_organizer),
+        permissions: user.is_superadmin
+          ? ["*"]
+          : [
+              "account:self",
+              ...(user.is_coach ? ["registration:create"] : []),
+              ...(user.is_organizer ? ["registration:review"] : []),
+            ],
         created_at: user.created_at,
       }
     : null;

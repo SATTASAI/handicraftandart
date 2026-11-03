@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { digest, now } from "../server/security.js";
 const origin = "https://accounts.example.test";
@@ -10,6 +10,7 @@ async function runtime(t) {
       modules: [
         { type: "ESModule", path: "server/index.js" },
         { type: "ESModule", path: "server/security.js" },
+        { type: "ESModule", path: "server/registrations.js" },
       ],
       compatibilityDate: "2026-11-02",
       d1Databases: ["DB"],
@@ -17,7 +18,10 @@ async function runtime(t) {
   );
   t.after(() => mf.dispose());
   const db = await mf.getD1Database("DB");
-  await db.exec(await readFile("migrations/0011_restart_accounts.sql", "utf8"));
+  for (const f of (await readdir("migrations"))
+    .filter((f) => f.endsWith(".sql"))
+    .sort())
+    await db.exec(await readFile("migrations/" + f, "utf8"));
   async function request(path, data, cookie = "", extra = {}) {
     const r = await mf.dispatchFetch(origin + "/api" + path, {
       method: data === undefined ? "GET" : "POST",
@@ -52,7 +56,7 @@ const account = (
 
 test("signup both roles, first-account superadmin, secure sessions, login/logout and authorization", async (t) => {
   const { db, request } = await runtime(t);
-  assert.equal((await request("/health")).body.release, "accounts-v1");
+  assert.equal((await request("/health")).body.release, "registration-v1");
   assert.equal((await request("/setup")).body.firstAccountAvailable, true);
   const first = await request("/signup", account());
   assert.equal(first.status, 201, JSON.stringify(first.body));

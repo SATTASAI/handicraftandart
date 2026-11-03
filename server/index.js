@@ -1,3 +1,4 @@
+import { registrationsApi } from "./registrations.js";
 import {
   now,
   random,
@@ -28,7 +29,7 @@ const cookieName = (r) =>
   new URL(r.url).protocol === "https:" ? "__Host-ha_session" : "ha_session";
 const sessionCookie = (r, token, age = 604800) =>
   `${cookieName(r)}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${age}${new URL(r.url).protocol === "https:" ? "; Secure" : ""}`;
-async function body(r) {
+async function body(r, maximum = 16384) {
   if (
     !(r.headers.get("content-type") || "")
       .toLowerCase()
@@ -43,7 +44,7 @@ async function body(r) {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.length;
-    if (size > 16384) {
+    if (size > maximum) {
       await reader.cancel();
       fail(413, "ข้อมูลมีขนาดใหญ่เกินกำหนด");
     }
@@ -103,7 +104,9 @@ async function api(r, env) {
     fail(403, "คำขอไม่ได้มาจากเว็บไซต์นี้");
   if (path === "/api/health" && r.method === "GET") {
     await db.prepare("SELECT id FROM account_bootstrap LIMIT 1").first();
-    return json({ ok: true, release: "accounts-v1" });
+    await db.prepare("SELECT id FROM event_competitions LIMIT 1").first();
+    await db.prepare("SELECT is_organizer FROM account_users LIMIT 1").first();
+    return json({ ok: true, release: "registration-v1" });
   }
   if (path === "/api/setup" && r.method === "GET")
     return json({
@@ -228,6 +231,18 @@ async function api(r, env) {
         .bind(await digest(token))
         .run();
     return json({ ok: true }, 200, { "Set-Cookie": sessionCookie(r, "", 0) });
+  }
+  if (
+    path === "/api/competitions" ||
+    path.startsWith("/api/registrations") ||
+    path.startsWith("/api/registration-documents") ||
+    path.startsWith("/api/admin/competitions") ||
+    path.startsWith("/api/admin/registrations") ||
+    path === "/api/admin/organizers"
+  ) {
+    const user = await currentUser(r, db);
+    if (!user) fail(401, "กรุณาเข้าสู่ระบบ");
+    return registrationsApi(r, env, user, { body, json, fail, limit });
   }
   if (path === "/api/admin/users" && r.method === "GET") {
     const user = await currentUser(r, db);

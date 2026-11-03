@@ -9,10 +9,12 @@ export function devApi() {
           modules: [
             { type: "ESModule", path: "server/index.js" },
             { type: "ESModule", path: "server/security.js" },
+            { type: "ESModule", path: "server/registrations.js" },
           ],
           compatibilityDate: "2026-11-02",
           d1Databases: ["DB"],
-          resourcePersistencePath: ".wrangler/accounts-v1",
+          resourcePersistencePath:
+            process.env.LOCAL_D1_PATH || ".wrangler/accounts-v1",
         }),
       );
       const db = await mf.getD1Database("DB");
@@ -27,6 +29,21 @@ export function devApi() {
           await readFile("migrations/0011_restart_accounts.sql", "utf8"),
         );
       }
+      if (
+        !(await db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='event_competitions'",
+          )
+          .first())
+      ) {
+        // Add the registration schema without resetting existing account data.
+        await db.exec(
+          await readFile(
+            "migrations/0012_competition_registration.sql",
+            "utf8",
+          ),
+        );
+      }
       server.middlewares.use(async (req, res, next) => {
         if (!req.url?.startsWith("/api/")) return next();
         try {
@@ -34,7 +51,12 @@ export function devApi() {
           let size = 0;
           for await (const chunk of req) {
             size += chunk.length;
-            if (size > 16384) {
+            if (
+              size >
+              (req.url.split("?")[0] === "/api/registration-documents"
+                ? 1048576
+                : 65536)
+            ) {
               res.writeHead(413, { "Content-Type": "application/json" });
               res.end(JSON.stringify({ error: "ข้อมูลมีขนาดใหญ่เกินกำหนด" }));
               return;

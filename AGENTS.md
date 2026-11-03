@@ -8,7 +8,12 @@ This is a fresh account system after the owner deleted the old app. Latest instr
 - All privileged routes must check the authenticated session on the server. Superadmin has all permissions. No client-only access checks.
 - Use real Cloudflare D1 and opaque HttpOnly session cookies. Never store plaintext passwords, localStorage authentication, credentials or synthetic accounts in Git.
 - Thai interface, compact blue/white header, pale-blue welcome panel, responsive forms.
-- This milestone implements signup, login, logout, account details and superadmin user list. Competition functionality is not implemented yet.
+- Current milestone also includes competition creation, coach-submitted student registration with ID-card images, and organizer/superadmin review. See docs/competition-registration.md.
 - D1 binding DB targets the existing handicraftandart database. Migration 0011 creates fresh account_* tables without importing old accounts or deleting old competition tables. The earlier remote database reset is still unperformed. Do not use the prior destructive SQL in /workspace/scratch as an account migration.
 - Dev: npm ci; npm run dev (port 4173), local persistence .wrangler/accounts-v1. Validate with npm test; npm run build; npx wrangler deploy --dry-run --outdir .wrangler/deploy-check.
 - No automatic production migration/build hook is included. Production migration and deployment require separate authorization; do not push to a deployment branch as part of local validation.
+
+- Owner added organizer (ผู้จัด) document-review authority. Only superadmin may assign/revoke organizer on existing accounts; public signup remains coach/judge/both. Organizer may inspect submitted documents and approve/return registrations, but cannot grant roles or review their own team. Superadmin retains all permissions.
+- Migration 0012 is additive: preserve existing accounts, passwords, sessions and bootstrap marker. Registration and reviewer authorization must be enforced by the API. Approved teams are read-only for coaches; edits before approval increment revision and return to pending. Reviews must match the current revision to prevent approving stale data.
+- Student fields are separate first name, last name, grade and school; each requires a private JPEG/PNG ID image. Never add real identity evidence or synthetic accounts to Git. Documents must be served via authenticated, no-store API with owner/reviewer checks, never public assets. Organizers cannot read orphan uploads. Keep per-image API limit at 1 MB.
+- Default local D1 remains .wrangler/accounts-v1; LOCAL_D1_PATH is only a non-secret local testing override. Browser QA must use isolated local data and synthetic ID images, preserving the normal dev database and all production accounts.

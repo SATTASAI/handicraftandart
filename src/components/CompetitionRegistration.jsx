@@ -1,0 +1,825 @@
+import React, { useEffect, useRef, useState } from "react";
+import { api } from "../api";
+const statuses = {
+  pending: "รอตรวจเอกสาร",
+  approved: "ยืนยันการลงทะเบียนแล้ว",
+  changes_requested: "ผู้จัดขอให้แก้ไข",
+};
+const date = (value) =>
+  value
+    ? new Intl.DateTimeFormat("th-TH", {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: "Asia/Bangkok",
+      }).format(new Date(value))
+    : "รอประกาศ";
+async function imageForUpload(file) {
+  if (!["image/jpeg", "image/png"].includes(file.type))
+    throw Error("เลือกภาพ JPG หรือ PNG เท่านั้น");
+  if (file.size > 10 * 1024 * 1024) throw Error("เลือกภาพขนาดไม่เกิน 10 MB");
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw Error("เปิดภาพไม่ได้ กรุณาเลือกไฟล์ JPG หรือ PNG ใหม่");
+  }
+  try {
+    const ratio = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height)),
+      canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * ratio));
+    canvas.height = Math.max(1, Math.round(bitmap.height * ratio));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw Error("ไม่สามารถเตรียมภาพได้");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    for (const quality of [0.88, 0.76, 0.64, 0.5]) {
+      const blob = await new Promise((resolve) =>
+        canvas.toBlob(resolve, "image/jpeg", quality),
+      );
+      if (blob && blob.size <= 1048576) return blob;
+    }
+    throw Error("ภาพมีขนาดใหญ่เกินไป กรุณาครอปให้เห็นเฉพาะบัตรแล้วลองใหม่");
+  } finally {
+    bitmap.close();
+  }
+}
+async function upload(file) {
+  const body = await imageForUpload(file),
+    response = await fetch("/api/registration-documents", {
+      method: "POST",
+      body,
+      headers: { "Content-Type": body.type },
+      credentials: "same-origin",
+    });
+  const result = await response.json();
+  if (!response.ok) {
+    if (response.status === 401)
+      window.dispatchEvent(new Event("auth-expired"));
+    throw Error(result.error || "อัปโหลดภาพไม่สำเร็จ");
+  }
+  return result.id;
+}
+const discard = (id) =>
+  fetch("/api/registration-documents/" + id, {
+    method: "DELETE",
+    credentials: "same-origin",
+    keepalive: true,
+  }).catch(() => {});
+function StudentPhoto({ student, index, disabled, onChange, onUploading }) {
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  return (
+    <div className="student-photo">
+      <label className="field">
+        ภาพบัตรประชาชน นักเรียนคนที่ {index + 1}
+        <input
+          type="file"
+          accept="image/jpeg,image/png"
+          disabled={disabled || busy}
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            setError("");
+            setBusy(true);
+            onUploading(1);
+            try {
+              onChange(await upload(file));
+            } catch (error) {
+              setError(error.message);
+            } finally {
+              setBusy(false);
+              onUploading(-1);
+              e.target.value = "";
+            }
+          }}
+        />
+      </label>
+      {busy && <p role="status">กำลังเตรียมและอัปโหลดภาพ…</p>}
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+      {student.document_id && (
+        <a
+          className="identity-preview"
+          href={"/api/registration-documents/" + student.document_id}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <img
+            src={"/api/registration-documents/" + student.document_id}
+            alt={"ภาพบัตรประชาชนนักเรียนคนที่ " + (index + 1)}
+          />
+          <span>ตรวจความชัดเจน / เปิดภาพเต็ม</span>
+        </a>
+      )}
+      <p className="muted">
+        JPG / PNG ไม่เกิน 10 MB ระบบจะปรับขนาดภาพก่อนจัดเก็บ
+        ภาพเปิดดูได้เฉพาะผู้ส่ง ผู้จัด และ superadmin
+      </p>
+    </div>
+  );
+}
+function RegistrationForm({ competition, user, existing, onDone, onCancel }) {
+  const blank = () => ({
+    key: crypto.randomUUID(),
+    first_name: "",
+    last_name: "",
+    grade: "",
+    school: user.school,
+    document_id: "",
+  });
+  const [students, setStudents] = useState(
+    existing?.students.map((s) => ({ ...s, key: s.id })) ||
+      Array.from({ length: competition.min_students }, blank),
+  );
+  const [busy, setBusy] = useState(false),
+    [uploading, setUploading] = useState(0),
+    [error, setError] = useState("");
+  const requestId = useRef(crypto.randomUUID()),
+    uploaded = useRef(new Set()),
+    saved = useRef(false);
+  const blocked = busy || uploading > 0;
+  useEffect(
+    () => () => {
+      if (!saved.current) for (const id of uploaded.current) discard(id);
+    },
+    [],
+  );
+  const update = (key, field, value) =>
+    setStudents((previous) =>
+      previous.map((s) => (s.key === key ? { ...s, [field]: value } : s)),
+    );
+  async function submit(e) {
+    e.preventDefault();
+    if (blocked) return;
+    setError("");
+    if (students.some((s) => !s.document_id)) {
+      setError("แนบภาพบัตรประชาชนของนักเรียนทุกคนก่อนส่ง");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api(existing ? "/registrations/" + existing.id : "/registrations", {
+        competition_id: competition.id,
+        request_id: requestId.current,
+        revision: existing?.revision,
+        students: students.map(({ key, id, position, ...student }) => student),
+      });
+      saved.current = true;
+      onDone();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="panel registration-form">
+      <button className="text-link" onClick={onCancel} disabled={blocked}>
+        ← กลับรายการ
+      </button>
+      <h2>{existing ? "แก้ไขรายการสมัคร" : "ลงทะเบียนแข่งขัน"}</h2>
+      <h3>{competition.title}</h3>
+      <p>
+        {competition.grade_label || "ตรวจระดับชั้นตามเกณฑ์รายการ"} · นักเรียน{" "}
+        {competition.min_students}–{competition.max_students} คน
+      </p>
+      <p className="muted">
+        ผู้ฝึกซ้อม: {user.name} · {user.school}
+      </p>
+      {existing?.review_note && (
+        <div className="notice">
+          ข้อเสนอแนะจากผู้จัด: {existing.review_note}
+        </div>
+      )}
+      <form onSubmit={submit}>
+        <fieldset disabled={blocked}>
+          {students.map((student, i) => (
+            <section className="student-card" key={student.key}>
+              <div className="section-heading">
+                <h3>นักเรียนคนที่ {i + 1}</h3>
+                <button
+                  className="secondary"
+                  type="button"
+                  disabled={students.length <= competition.min_students}
+                  onClick={() => {
+                    if (uploaded.current.has(student.document_id)) {
+                      discard(student.document_id);
+                      uploaded.current.delete(student.document_id);
+                    }
+                    setStudents(students.filter((s) => s.key !== student.key));
+                  }}
+                >
+                  ลบนักเรียนคนที่ {i + 1}
+                </button>
+              </div>
+              <div className="student-fields">
+                <label className="field">
+                  ชื่อ นักเรียนคนที่ {i + 1}
+                  <input
+                    value={student.first_name}
+                    required
+                    maxLength={100}
+                    onChange={(e) =>
+                      update(student.key, "first_name", e.target.value)
+                    }
+                  />
+                </label>
+                <label className="field">
+                  นามสกุล นักเรียนคนที่ {i + 1}
+                  <input
+                    value={student.last_name}
+                    required
+                    maxLength={100}
+                    onChange={(e) =>
+                      update(student.key, "last_name", e.target.value)
+                    }
+                  />
+                </label>
+                <label className="field">
+                  ชั้น นักเรียนคนที่ {i + 1}
+                  <input
+                    value={student.grade}
+                    required
+                    maxLength={20}
+                    placeholder="เช่น ป.4"
+                    onChange={(e) =>
+                      update(student.key, "grade", e.target.value)
+                    }
+                  />
+                </label>
+                <label className="field">
+                  โรงเรียน นักเรียนคนที่ {i + 1}
+                  <input
+                    value={student.school}
+                    required
+                    minLength={2}
+                    maxLength={150}
+                    onChange={(e) =>
+                      update(student.key, "school", e.target.value)
+                    }
+                  />
+                </label>
+              </div>
+              <StudentPhoto
+                student={student}
+                index={i}
+                disabled={blocked}
+                onUploading={(delta) =>
+                  setUploading((n) => Math.max(0, n + delta))
+                }
+                onChange={(id) => {
+                  uploaded.current.add(id);
+                  if (uploaded.current.has(student.document_id)) {
+                    discard(student.document_id);
+                    uploaded.current.delete(student.document_id);
+                  }
+                  update(student.key, "document_id", id);
+                }}
+              />
+            </section>
+          ))}
+          <div className="form-actions">
+            <button
+              className="secondary"
+              type="button"
+              disabled={students.length >= competition.max_students}
+              onClick={() => setStudents([...students, blank()])}
+            >
+              ＋ เพิ่มนักเรียน
+            </button>
+            <span className="muted">
+              {students.length} / {competition.max_students} คน
+            </span>
+          </div>
+          <div className="notice">
+            ส่งข้อมูลแล้วจะมีสถานะ “รอตรวจเอกสาร” ผู้จัดหรือ superadmin
+            จะตรวจสอบก่อนยืนยันการลงทะเบียน การแก้ไขข้อมูลจะส่งเข้าคิวตรวจใหม่
+          </div>
+          {error && (
+            <p role="alert" className="error">
+              {error}
+            </p>
+          )}
+          <button type="submit" className="primary">
+            {busy
+              ? "กำลังส่งรายการ…"
+              : uploading
+                ? "กำลังอัปโหลดภาพ…"
+                : "ส่งให้ผู้จัดตรวจสอบ"}
+          </button>
+        </fieldset>
+      </form>
+    </section>
+  );
+}
+function RegistrationCard({ row, review, user, onEdit, onReviewed }) {
+  const [expanded, setExpanded] = useState(false),
+    [note, setNote] = useState(""),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const selfReview = !user.is_superadmin && row.owner_id === user.id;
+  async function decide(status) {
+    if (busy) return;
+    if (status === "changes_requested" && !note.trim()) {
+      setError("ระบุข้อมูลที่ต้องแก้ไขก่อนส่งกลับ");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api("/admin/registrations/" + row.id + "/review", {
+        revision: row.revision,
+        status,
+        note,
+      });
+      onReviewed();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <article className="panel registration-card">
+      <div className="section-heading">
+        <div>
+          <h3>{row.title}</h3>
+          <p className="muted">
+            ผู้ส่ง: {row.coach_name} · {row.coach_school} ·{" "}
+            {row.students.length} คน
+          </p>
+        </div>
+        <span className={"badge status-" + row.status}>
+          {statuses[row.status]}
+        </span>
+      </div>
+      <p className="muted">
+        แข่งขัน: {date(row.starts_at)} · สถานที่: {row.venue || "รอประกาศ"} ·
+        ฉบับที่ {row.revision}
+      </p>
+      {row.review_note && (
+        <div className="notice">หมายเหตุจากผู้ตรวจ: {row.review_note}</div>
+      )}
+      {row.reviewer_name && (
+        <p className="muted">ผู้ตรวจ: {row.reviewer_name}</p>
+      )}
+      <div className="form-actions">
+        <button
+          className="secondary"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+        >
+          {expanded ? "ซ่อนรายละเอียด" : "ดูข้อมูลและเอกสาร"}
+        </button>
+        {!review &&
+          row.status !== "approved" &&
+          Boolean(row.registration_open) && (
+            <button className="secondary" onClick={() => onEdit(row)}>
+              แก้ไขรายการสมัคร
+            </button>
+          )}
+      </div>
+      {expanded && (
+        <div className="registration-details">
+          {row.students.map((s, i) => (
+            <section className="student-card" key={s.id}>
+              <h4>
+                {i + 1}. {s.first_name} {s.last_name}
+              </h4>
+              <p>
+                ชั้น {s.grade} · {s.school}
+              </p>
+              <a
+                className="identity-preview"
+                href={"/api/registration-documents/" + s.document_id}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <img
+                  src={"/api/registration-documents/" + s.document_id}
+                  alt={"บัตรประชาชนของ " + s.first_name + " " + s.last_name}
+                  loading="lazy"
+                />
+                <span>เปิดภาพเต็มเพื่อตรวจเอกสาร</span>
+              </a>
+            </section>
+          ))}
+          {review &&
+            row.status === "pending" &&
+            (selfReview ? (
+              <p className="notice">
+                เป็นรายการที่คุณส่งเอง กรุณาให้ผู้จัดคนอื่นหรือ superadmin
+                ตรวจสอบ
+              </p>
+            ) : (
+              <div className="review-controls">
+                <label className="field">
+                  หมายเหตุ / ข้อมูลที่ต้องแก้ไข
+                  <textarea
+                    maxLength={1000}
+                    rows={3}
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    disabled={busy}
+                  />
+                </label>
+                {error && (
+                  <p role="alert" className="error">
+                    {error}
+                  </p>
+                )}
+                <div className="form-actions">
+                  <button
+                    className="primary"
+                    disabled={busy}
+                    onClick={() => decide("approved")}
+                  >
+                    ยืนยันการลงทะเบียน
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() => decide("changes_requested")}
+                  >
+                    ส่งกลับให้แก้ไข
+                  </button>
+                </div>
+              </div>
+            ))}
+        </div>
+      )}
+    </article>
+  );
+}
+function ManageCompetitions({ competitions, onChanged }) {
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  async function create(e) {
+    e.preventDefault();
+    const form = e.currentTarget,
+      b = Object.fromEntries(new FormData(form));
+    b.min_students = Number(b.min_students);
+    b.max_students = Number(b.max_students);
+    b.starts_at = b.starts_at
+      ? new Date(b.starts_at + ":00+07:00").toISOString()
+      : "";
+    setBusy(true);
+    setError("");
+    try {
+      await api("/admin/competitions", b);
+      form.reset();
+      onChanged();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <section className="panel">
+        <h2>เพิ่มรายการแข่งขัน</h2>
+        <form onSubmit={create}>
+          <fieldset disabled={busy}>
+            <div className="student-fields">
+              <label className="field">
+                ชื่อรายการแข่งขัน
+                <input name="title" required minLength={2} maxLength={200} />
+              </label>
+              <label className="field">
+                ระดับชั้นที่รับสมัคร
+                <input
+                  name="grade_label"
+                  maxLength={100}
+                  placeholder="เช่น ป.4–6 ตามระเบียบรายการ"
+                />
+              </label>
+              <label className="field">
+                จำนวนนักเรียนขั้นต่ำ
+                <input
+                  name="min_students"
+                  type="number"
+                  min={1}
+                  max={20}
+                  defaultValue={1}
+                  required
+                />
+              </label>
+              <label className="field">
+                จำนวนนักเรียนสูงสุด
+                <input
+                  name="max_students"
+                  type="number"
+                  min={1}
+                  max={20}
+                  defaultValue={1}
+                  required
+                />
+              </label>
+              <label className="field">
+                วันเวลาแข่งขัน (เวลาไทย ถ้าทราบ)
+                <input name="starts_at" type="datetime-local" />
+              </label>
+              <label className="field">
+                สถานที่แข่งขัน
+                <input name="venue" maxLength={200} />
+              </label>
+            </div>
+            <label className="field">
+              รายละเอียด / เกณฑ์การแข่งขัน
+              <textarea name="description" rows={3} maxLength={3000} />
+            </label>
+            {error && (
+              <p role="alert" className="error">
+                {error}
+              </p>
+            )}
+            <button className="primary" type="submit">
+              {busy ? "กำลังเพิ่มรายการ…" : "เพิ่มรายการและเปิดรับสมัคร"}
+            </button>
+          </fieldset>
+        </form>
+      </section>
+      <div className="competition-list">
+        {competitions.map((c) => (
+          <article className="panel" key={c.id}>
+            <h3>{c.title}</h3>
+            <p>
+              {c.grade_label} ·{" "}
+              {c.registration_open ? "เปิดรับสมัคร" : "ปิดรับสมัคร"}
+            </p>
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                setError("");
+                try {
+                  await api("/admin/competitions/" + c.id, {
+                    registration_open: !c.registration_open,
+                  });
+                  onChanged();
+                } catch (e) {
+                  setError(e.message);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {c.registration_open ? "ปิดรับสมัคร" : "เปิดรับสมัคร"}
+            </button>
+          </article>
+        ))}
+      </div>
+    </>
+  );
+}
+export default function CompetitionRegistration({ user }) {
+  const coach = user.is_superadmin || user.roles.includes("coach"),
+    reviewer = user.is_superadmin || user.is_organizer;
+  const [tab, setTab] = useState("competitions"),
+    [competitions, setCompetitions] = useState([]),
+    [rows, setRows] = useState([]),
+    [hasMore, setHasMore] = useState(false),
+    [page, setPage] = useState(1),
+    [filter, setFilter] = useState("pending"),
+    [version, setVersion] = useState(0),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState(""),
+    [success, setSuccess] = useState(""),
+    [form, setForm] = useState(null);
+  const refresh = () => setVersion((n) => n + 1);
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+    const list =
+      tab === "mine"
+        ? "/registrations?page=" + page
+        : tab === "review"
+          ? "/admin/registrations?page=" + page + "&status=" + filter
+          : null;
+    Promise.all([
+      api("/competitions"),
+      list ? api(list) : Promise.resolve({ registrations: [], hasMore: false }),
+    ])
+      .then(([c, r]) => {
+        if (active) {
+          setCompetitions(c.competitions);
+          setRows(r.registrations);
+          setHasMore(r.hasMore);
+        }
+      })
+      .catch((e) => {
+        if (active) setError(e.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user.id, tab, page, filter, version]);
+  const tabs = [
+    ["competitions", "รายการแข่งขัน"],
+    ...(coach ? [["mine", "รายการสมัครของฉัน"]] : []),
+    ...(reviewer ? [["review", "ตรวจเอกสาร / ยืนยัน"]] : []),
+    ...(user.is_superadmin ? [["manage", "จัดการรายการแข่งขัน"]] : []),
+  ];
+  return (
+    <section className="competition-workspace" aria-label="ลงทะเบียนแข่งขัน">
+      <nav className="workspace-tabs" aria-label="เมนูการแข่งขัน">
+        {tabs.map(([key, label]) => (
+          <button
+            key={key}
+            className={tab === key ? "active" : ""}
+            aria-current={tab === key ? "page" : undefined}
+            onClick={() => {
+              setTab(key);
+              setPage(1);
+              setForm(null);
+              setSuccess("");
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      {!form && (
+        <div className="workspace-refresh">
+          <button className="secondary" disabled={loading} onClick={refresh}>
+            อัปเดตข้อมูล
+          </button>
+        </div>
+      )}
+      {success && (
+        <p className="success-message" role="status">
+          {success}
+        </p>
+      )}
+      {error && (
+        <div className="error" role="alert">
+          {error}{" "}
+          <button className="text-link" onClick={refresh}>
+            ลองใหม่
+          </button>
+        </div>
+      )}
+      {form ? (
+        <RegistrationForm
+          key={form.existing?.id || form.competition.id}
+          user={user}
+          competition={form.competition}
+          existing={form.existing}
+          onCancel={() => setForm(null)}
+          onDone={() => {
+            setSuccess("ส่งรายการแล้ว รอผู้จัดตรวจเอกสารและยืนยันการลงทะเบียน");
+            setForm(null);
+            setTab("mine");
+            setPage(1);
+            refresh();
+          }}
+        />
+      ) : loading ? (
+        <p role="status">กำลังโหลดรายการแข่งขัน…</p>
+      ) : tab === "competitions" ? (
+        <>
+          <div className="section-heading">
+            <h2>รายการแข่งขันศิลปหัตถกรรม</h2>
+          </div>
+          {!competitions.length ? (
+            <section className="panel">
+              <h3>ยังไม่มีรายการแข่งขัน</h3>
+              <p>
+                {user.is_superadmin
+                  ? "เพิ่มรายการในเมนูจัดการรายการแข่งขันเพื่อเปิดให้ครูลงทะเบียน"
+                  : "ผู้จัดจะแจ้งรายการแข่งขันเมื่อเปิดรับสมัคร"}
+              </p>
+            </section>
+          ) : (
+            <div className="competition-list">
+              {competitions.map((c) => (
+                <article className="panel" key={c.id}>
+                  <span
+                    className={
+                      "badge " + (c.registration_open ? "status-approved" : "")
+                    }
+                  >
+                    {c.registration_open ? "เปิดรับสมัคร" : "ปิดรับสมัคร"}
+                  </span>
+                  <h3>{c.title}</h3>
+                  <p>
+                    {c.grade_label || "ดูเกณฑ์รายการ"} · นักเรียน{" "}
+                    {c.min_students}–{c.max_students} คน
+                  </p>
+                  <p className="preserve-lines">
+                    {c.description || "ผู้จัดยังไม่ได้ระบุรายละเอียดเพิ่มเติม"}
+                  </p>
+                  <p className="muted">
+                    แข่งขัน: {date(c.starts_at)}
+                    <br />
+                    สถานที่: {c.venue || "รอประกาศ"}
+                  </p>
+                  {coach ? (
+                    <button
+                      className="primary"
+                      disabled={!c.registration_open}
+                      onClick={() => {
+                        setSuccess("");
+                        setForm({ competition: c });
+                      }}
+                    >
+                      ลงทะเบียนนักเรียน
+                    </button>
+                  ) : (
+                    <p className="muted">
+                      ผู้ฝึกซ้อมเป็นผู้ลงทะเบียนให้นักเรียน
+                    </p>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+        </>
+      ) : tab === "manage" ? (
+        <ManageCompetitions competitions={competitions} onChanged={refresh} />
+      ) : (
+        <>
+          <div className="section-heading">
+            <h2>
+              {tab === "review"
+                ? "ตรวจเอกสารและยืนยันการลงทะเบียน"
+                : "รายการสมัครของฉัน"}
+            </h2>
+            {tab === "review" && (
+              <label className="filter-label">
+                สถานะ
+                <select
+                  value={filter}
+                  onChange={(e) => {
+                    setFilter(e.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="pending">รอตรวจเอกสาร</option>
+                  <option value="approved">ยืนยันแล้ว</option>
+                  <option value="changes_requested">ขอให้แก้ไข</option>
+                  <option value="">ทั้งหมด</option>
+                </select>
+              </label>
+            )}
+          </div>
+          {!rows.length ? (
+            <section className="panel">
+              <p>
+                {tab === "review"
+                  ? "ไม่มีรายการในสถานะที่เลือก"
+                  : "ยังไม่มีรายการสมัคร เลือกรายการแข่งขันเพื่อเริ่มลงทะเบียน"}
+              </p>
+            </section>
+          ) : (
+            rows.map((row) => (
+              <RegistrationCard
+                key={row.id + ":" + row.revision + ":" + row.status}
+                row={row}
+                review={tab === "review"}
+                user={user}
+                onReviewed={() => {
+                  setSuccess("บันทึกผลตรวจแล้ว");
+                  refresh();
+                }}
+                onEdit={(existing) => {
+                  const competition = competitions.find(
+                    (c) => c.id === existing.competition_id,
+                  );
+                  if (competition) setForm({ competition, existing });
+                }}
+              />
+            ))
+          )}
+          <div className="form-actions">
+            <button
+              className="secondary"
+              disabled={page === 1}
+              onClick={() => setPage((n) => n - 1)}
+            >
+              ก่อนหน้า
+            </button>
+            <span>หน้า {page}</span>
+            <button
+              className="secondary"
+              disabled={!hasMore}
+              onClick={() => setPage((n) => n + 1)}
+            >
+              ถัดไป
+            </button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}

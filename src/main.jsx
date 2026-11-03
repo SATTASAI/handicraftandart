@@ -1,8 +1,9 @@
+import CompetitionRegistration from "./components/CompetitionRegistration";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { api } from "./api";
 import "./styles.css";
-const labels = { coach: "ผู้ฝึกซ้อม", judge: "กรรมการ" };
+const labels = { coach: "ผู้ฝึกซ้อม", judge: "กรรมการ", organizer: "ผู้จัด" };
 function go(path) {
   history.pushState({}, "", path);
   window.dispatchEvent(new PopStateEvent("popstate"));
@@ -238,6 +239,37 @@ function Auth({ signup, onUser }) {
 function Dashboard({ user, onLogout }) {
   const [users, setUsers] = useState([]),
     [error, setError] = useState("");
+  const [organizerBusy, setOrganizerBusy] = useState(false);
+  async function setOrganizer(id, enabled) {
+    const previousUser = users.find((u) => u.id === id);
+    setUsers((previous) =>
+      previous.map((u) =>
+        u.id === id
+          ? {
+              ...u,
+              is_organizer: enabled,
+              roles: [
+                ...u.roles.filter((r) => r !== "organizer"),
+                ...(enabled ? ["organizer"] : []),
+              ],
+            }
+          : u,
+      ),
+    );
+    setOrganizerBusy(true);
+    setError("");
+    try {
+      const r = await api("/admin/organizers", { user_id: id, enabled });
+      setUsers((previous) => previous.map((u) => (u.id === id ? r.user : u)));
+    } catch (e) {
+      setUsers((previous) =>
+        previous.map((u) => (u.id === id ? previousUser : u)),
+      );
+      setError(e.message);
+    } finally {
+      setOrganizerBusy(false);
+    }
+  }
   useEffect(() => {
     if (!user.is_superadmin) return;
     let active = true;
@@ -260,10 +292,16 @@ function Dashboard({ user, onLogout }) {
           <h1>สวัสดี คุณ{user.name}</h1>
           <p>เข้าสู่ระบบเรียบร้อยแล้ว</p>
         </div>
+        {user.is_superadmin && (
+          <a href="#user-management" className="secondary">
+            มอบสิทธิ์ผู้จัด
+          </a>
+        )}
         <button className="secondary" onClick={onLogout}>
           ออกจากระบบ
         </button>
       </div>
+      <CompetitionRegistration user={user} />
       <div className="dashboard-grid">
         <section className="panel">
           <h2>ข้อมูลบัญชี</h2>
@@ -294,13 +332,12 @@ function Dashboard({ user, onLogout }) {
               : "บัญชีของคุณพร้อมใช้งานตามบทบาทที่เลือก"}
           </p>
           <p className="muted">
-            ระบบนี้เริ่มใหม่ด้วยส่วนบัญชีผู้ใช้
-            ฟังก์ชันจัดการแข่งขันจะเพิ่มในขั้นถัดไป
+            ผู้ฝึกซ้อมลงทะเบียนนักเรียนได้ ผู้จัดตรวจเอกสารและยืนยันรายการสมัคร
           </p>
         </section>
       </div>
       {user.is_superadmin && (
-        <section className="panel user-panel">
+        <section id="user-management" className="panel user-panel">
           <div className="section-heading">
             <h2>ผู้ใช้งานในระบบ</h2>
             <span className="badge">{users.length} บัญชี</span>
@@ -319,6 +356,7 @@ function Dashboard({ user, onLogout }) {
                     <th>อีเมล</th>
                     <th>บทบาท</th>
                     <th>สิทธิ์</th>
+                    <th>สิทธิ์ผู้จัดตรวจเอกสาร</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -329,6 +367,24 @@ function Dashboard({ user, onLogout }) {
                       <td>{u.email}</td>
                       <td>{u.roles.map((r) => labels[r]).join(" / ")}</td>
                       <td>{u.is_superadmin ? "superadmin" : "ผู้ใช้งาน"}</td>
+                      <td>
+                        {u.is_superadmin ? (
+                          "มีสิทธิ์ทั้งหมด"
+                        ) : (
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(u.is_organizer)}
+                              disabled={organizerBusy}
+                              onChange={(e) =>
+                                setOrganizer(u.id, e.target.checked)
+                              }
+                              aria-label={"ให้สิทธิ์ผู้จัดแก่ " + u.name}
+                            />{" "}
+                            ผู้จัดตรวจเอกสาร
+                          </label>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -408,7 +464,7 @@ function App() {
           <strong>ศิลปหัตถกรรม</strong>
           <small>ศูนย์เครือข่ายสองพี่น้อง ห้วยแม่เพรียง ป่าเด็ง</small>
         </div>
-        <span className="header-note">ระบบบัญชีผู้ใช้งาน</span>
+        <span className="header-note">ระบบลงทะเบียนแข่งขัน</span>
       </header>
       <main id="main">
         {!ready ? (
