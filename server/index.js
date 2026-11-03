@@ -1,0 +1,274 @@
+import {
+  now,
+  random,
+  digest,
+  hashPassword,
+  verifyPassword,
+  publicUser,
+} from "./security.js";
+class ApiError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+const fail = (status, message) => {
+  throw new ApiError(status, message);
+};
+const json = (data, status = 200, headers = {}) =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      ...headers,
+    },
+  });
+const cookieName = (r) =>
+  new URL(r.url).protocol === "https:" ? "__Host-ha_session" : "ha_session";
+const sessionCookie = (r, token, age = 604800) =>
+  `${cookieName(r)}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${age}${new URL(r.url).protocol === "https:" ? "; Secure" : ""}`;
+async function body(r) {
+  if (
+    !(r.headers.get("content-type") || "")
+      .toLowerCase()
+      .startsWith("application/json")
+  )
+    fail(415, "กรุณาส่งข้อมูลแบบ JSON");
+  const reader = r.body?.getReader();
+  if (!reader) fail(400, "ไม่พบข้อมูล");
+  const chunks = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > 16384) {
+      await reader.cancel();
+      fail(413, "ข้อมูลมีขนาดใหญ่เกินกำหนด");
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  try {
+    const value = JSON.parse(new TextDecoder().decode(bytes));
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw Error();
+    return value;
+  } catch {
+    fail(400, "ข้อมูลไม่ถูกต้อง");
+  }
+}
+async function currentUser(r, db) {
+  const token = (r.headers.get("cookie") || "")
+    .split(";")
+    .map((x) => x.trim())
+    .find((x) => x.startsWith(cookieName(r) + "="))
+    ?.slice(cookieName(r).length + 1);
+  if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
+  return db
+    .prepare(
+      "SELECT u.* FROM account_sessions s JOIN account_users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?",
+    )
+    .bind(await digest(token), now())
+    .first();
+}
+async function limit(db, r, action, maximum, seconds) {
+  const key = await digest(
+    action + ":" + (r.headers.get("CF-Connecting-IP") || "local"),
+  );
+  const t = now();
+  const result = await db
+    .prepare(
+      "INSERT INTO account_limits(key,attempts,resets_at) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=CASE WHEN resets_at<=? THEN 1 ELSE attempts+1 END,resets_at=CASE WHEN resets_at<=? THEN excluded.resets_at ELSE resets_at END RETURNING attempts",
+    )
+    .bind(key, t + seconds, t, t)
+    .first();
+  if (result.attempts > maximum)
+    fail(429, "ลองหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่");
+}
+async function api(r, env) {
+  if (!env.DB) fail(503, "ยังไม่ได้เชื่อมต่อฐานข้อมูล");
+  const path = new URL(r.url).pathname,
+    db = env.DB;
+  if (
+    !["GET", "HEAD"].includes(r.method) &&
+    r.headers.get("origin") !== new URL(r.url).origin
+  )
+    fail(403, "คำขอไม่ได้มาจากเว็บไซต์นี้");
+  if (path === "/api/health" && r.method === "GET") {
+    await db.prepare("SELECT id FROM account_bootstrap LIMIT 1").first();
+    return json({ ok: true, release: "accounts-v1" });
+  }
+  if (path === "/api/setup" && r.method === "GET")
+    return json({
+      firstAccountAvailable: !(await db
+        .prepare("SELECT id FROM account_bootstrap WHERE id=1")
+        .first()),
+    });
+  if (path === "/api/me" && r.method === "GET")
+    return json({ user: publicUser(await currentUser(r, db)) });
+  if (path === "/api/signup" && r.method === "POST") {
+    await limit(db, r, "signup", 10, 3600);
+    const b = await body(r);
+    const name = typeof b.name === "string" ? b.name.trim() : "",
+      school = typeof b.school === "string" ? b.school.trim() : "",
+      email = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
+    if (
+      name.length < 2 ||
+      name.length > 100 ||
+      school.length < 2 ||
+      school.length > 150
+    )
+      fail(400, "กรอกชื่อ–นามสกุลและโรงเรียนให้ครบ");
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      fail(400, "กรุณากรอกอีเมลให้ถูกต้อง");
+    if (
+      typeof b.password !== "string" ||
+      b.password.length < 12 ||
+      b.password.length > 128
+    )
+      fail(400, "รหัสผ่านต้องมี 12–128 ตัวอักษร");
+    if (
+      !Array.isArray(b.roles) ||
+      !b.roles.length ||
+      b.roles.length > 2 ||
+      b.roles.some((x) => !["coach", "judge"].includes(x)) ||
+      new Set(b.roles).size !== b.roles.length
+    )
+      fail(400, "เลือกผู้ฝึกซ้อม กรรมการ หรือทั้งสองอย่าง");
+    const id = crypto.randomUUID(),
+      t = now(),
+      passwordHash = await hashPassword(b.password),
+      token = random();
+    try {
+      // D1 batch is atomic. The first serialized signup claims the permanent marker.
+      await db.batch([
+        db
+          .prepare(
+            "INSERT INTO account_users(id,name,school,email,password_hash,is_coach,is_judge,is_superadmin,created_at) SELECT ?,?,?,?,?,?,?,CASE WHEN EXISTS(SELECT 1 FROM account_bootstrap WHERE id=1) THEN 0 ELSE 1 END,?",
+          )
+          .bind(
+            id,
+            name,
+            school,
+            email,
+            passwordHash,
+            b.roles.includes("coach") ? 1 : 0,
+            b.roles.includes("judge") ? 1 : 0,
+            t,
+          ),
+        db
+          .prepare(
+            "INSERT INTO account_bootstrap(id,user_id,created_at) SELECT 1,id,? FROM account_users WHERE id=? AND is_superadmin=1 ON CONFLICT(id) DO NOTHING",
+          )
+          .bind(t, id),
+        db
+          .prepare(
+            "INSERT INTO account_sessions(token_hash,user_id,expires_at) VALUES(?,?,?)",
+          )
+          .bind(await digest(token), id, t + 604800),
+      ]);
+    } catch (error) {
+      if (/UNIQUE constraint failed: account_users.email/i.test(String(error)))
+        fail(409, "ไม่สามารถสมัครด้วยอีเมลนี้ได้ หากมีบัญชีแล้วให้เข้าสู่ระบบ");
+      throw error;
+    }
+    const user = await db
+      .prepare("SELECT * FROM account_users WHERE id=?")
+      .bind(id)
+      .first();
+    return json({ user: publicUser(user) }, 201, {
+      "Set-Cookie": sessionCookie(r, token),
+    });
+  }
+  if (path === "/api/login" && r.method === "POST") {
+    await limit(db, r, "login", 20, 900);
+    const b = await body(r),
+      email = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
+    if (
+      typeof b.password !== "string" ||
+      b.password.length > 128 ||
+      email.length > 254
+    )
+      fail(401, "อีเมลหรือรหัสผ่านไม่ถูกต้อง");
+    const user = await db
+      .prepare("SELECT * FROM account_users WHERE email=?")
+      .bind(email)
+      .first();
+    const valid = await verifyPassword(
+      b.password,
+      user?.password_hash ||
+        "pbkdf2-sha256$100000$" + "0".repeat(64) + "$" + "0".repeat(64),
+    );
+    if (!user || !valid) fail(401, "อีเมลหรือรหัสผ่านไม่ถูกต้อง");
+    const token = random();
+    await db
+      .prepare("INSERT INTO account_sessions VALUES(?,?,?)")
+      .bind(await digest(token), user.id, now() + 604800)
+      .run();
+    return json({ user: publicUser(user) }, 200, {
+      "Set-Cookie": sessionCookie(r, token),
+    });
+  }
+  if (path === "/api/logout" && r.method === "POST") {
+    const token = (r.headers.get("cookie") || "")
+      .split(";")
+      .map((x) => x.trim())
+      .find((x) => x.startsWith(cookieName(r) + "="))
+      ?.slice(cookieName(r).length + 1);
+    if (token)
+      await db
+        .prepare("DELETE FROM account_sessions WHERE token_hash=?")
+        .bind(await digest(token))
+        .run();
+    return json({ ok: true }, 200, { "Set-Cookie": sessionCookie(r, "", 0) });
+  }
+  if (path === "/api/admin/users" && r.method === "GET") {
+    const user = await currentUser(r, db);
+    if (!user) fail(401, "กรุณาเข้าสู่ระบบ");
+    if (!user.is_superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
+    return json({
+      users: (
+        await db
+          .prepare("SELECT * FROM account_users ORDER BY created_at,id")
+          .all()
+      ).results.map(publicUser),
+    });
+  }
+  fail(404, "ไม่พบรายการที่ร้องขอ");
+}
+export default {
+  async fetch(r, env) {
+    let response;
+    try {
+      response = new URL(r.url).pathname.startsWith("/api/")
+        ? await api(r, env)
+        : await env.ASSETS.fetch(r);
+    } catch (error) {
+      response = json(
+        {
+          error:
+            error instanceof ApiError
+              ? error.message
+              : "ระบบขัดข้อง กรุณาลองใหม่ภายหลัง",
+        },
+        error instanceof ApiError ? error.status : 500,
+      );
+    }
+    const headers = new Headers(response.headers);
+    headers.set("X-Content-Type-Options", "nosniff");
+    headers.set("Referrer-Policy", "same-origin");
+    headers.set("X-Frame-Options", "DENY");
+    headers.set(
+      "Content-Security-Policy",
+      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+    );
+    return new Response(response.body, { status: response.status, headers });
+  },
+};
