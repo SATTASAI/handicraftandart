@@ -1,1 +1,0 @@
-ALTER TABLE registrations ADD COLUMN work_url TEXT NOT NULL DEFAULT '';
