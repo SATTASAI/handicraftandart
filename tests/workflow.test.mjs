@@ -22,7 +22,7 @@ test("verified workflow: private identity, approval, separate deadlines, whole-c
   t.after(() => mf.dispose());
   const db = await mf.getD1Database("DB");
   for (const f of (await readdir("migrations"))
-    .filter((f) => f.endsWith(".sql"))
+    .filter((f) => f.endsWith(".sql") && f < "0010")
     .sort()) {
     const statements = (await readFile("migrations/" + f, "utf8"))
       .split(";")

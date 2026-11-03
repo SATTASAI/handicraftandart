@@ -1,39 +1,27 @@
-import { api } from "../api";
-import IdentityUpload from "./IdentityUpload";
-export default function AccountVerification({ user, onUser }) {
+export default function AccountVerification({ user }) {
   return (
     <section className="score-panel">
-      <h1>สถานะบัญชีโรงเรียน / กรรมการ</h1>
-      <p>
-        ชื่อ {user.name} · {user.school}
-      </p>
-      <p>
-        สถานะ:{" "}
-        {
-          {
-            approved: "แอดมินยืนยันแล้ว",
-            pending: "รอแอดมินตรวจสอบ",
-            rejected: "ต้องแก้ไขหลักฐาน",
-          }[user.approval_status]
-        }
-      </p>
-      {user.approval_note && <p>{user.approval_note}</p>}
-      <IdentityUpload
-        purpose="account"
-        label="ภาพถ่ายบัตรประชาชนของผู้สมัครบัญชี"
-        value={user.identity_document_id}
-        onChange={async () => onUser((await api("/auth/me")).user)}
-      />
-      <p className="helper">
-        บัญชีใหม่ต้องผ่านการตรวจสอบก่อนลงทะเบียนหรือทำหน้าที่กรรมการ
-        การเปลี่ยนหลักฐานจะส่งให้แอดมินตรวจใหม่
-      </p>
-      <button
-        className="btn"
-        onClick={async () => onUser((await api("/auth/me")).user)}
-      >
-        ตรวจสถานะล่าสุด
-      </button>
+      <h1>บัญชีครู</h1>
+      <h2>{user.name}</h2>
+      <p>{user.school}</p>
+      <p>{user.email}</p>
+      {user.approval_status !== "approved" ? (
+        <p role="alert">
+          บัญชีนี้ถูกระงับหรืออยู่ในขั้นตอนเดิม กรุณาติดต่อผู้จัด{" "}
+          {user.approval_note}
+        </p>
+      ) : (
+        <>
+          <p>
+            ใช้บัญชีนี้ลงทะเบียนนักเรียนและรับงานกรรมการได้
+            ไม่ต้องสร้างบัญชีเพิ่มหรืออัปโหลดบัตร
+          </p>
+          <p>
+            ผู้จัดเป็นผู้มอบหมายรายการตัดสิน
+            ครูจะไม่สามารถตัดสินรายการที่มีโรงเรียนตัวเองเข้าแข่งขัน
+          </p>
+        </>
+      )}
     </section>
   );
 }

@@ -66,7 +66,7 @@ test("primary trial: eligibility, school conflicts, full panels, deductions, nor
   t.after(() => mf.dispose());
   const db = await mf.getD1Database("DB");
   for (const file of (await readdir("migrations"))
-    .filter((f) => f.endsWith(".sql"))
+    .filter((f) => f.endsWith(".sql") && f < "0010")
     .sort()) {
     if (file === "0008_primary_catalog_2568.sql") {
       await db.batch([

@@ -4,7 +4,7 @@ import {
   digest,
   passwordHash,
   verifyPassword,
-  publicUser,
+  publicUser as serializeUser,
   medal,
   safeText,
   validPassword,
@@ -178,6 +178,8 @@ async function windowFor(env) {
 }
 function registrationTime(c, w, editing = false) {
   if (!c.workflow_version) return true;
+  if (c.workflow_version === 2 && !w.opens_at && !w.closes_at && !w.edits_until)
+    return Boolean(c.registration_open);
   const t = now();
   return editing
     ? !!w.edits_until && t < w.edits_until
@@ -287,6 +289,9 @@ async function api(r, env) {
     path = url.pathname,
     method = r.method;
   if (!env.DB) fail(503, "ยังไม่ได้เชื่อมต่อฐานข้อมูล D1");
+  const simple = Boolean((await windowFor(env))?.simple_registration);
+  const publicUser = (u) =>
+    u ? { ...serializeUser(u), simple_workflow: simple } : null;
   if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
     const origin = r.headers.get("origin");
     if (!origin || origin !== url.origin)
@@ -308,7 +313,9 @@ async function api(r, env) {
     return json({
       ok: true,
       adminSetupComplete: Boolean(setup),
-      release: "verified-workflow-2569",
+      release: simple
+        ? "simple-teacher-workflow-2569"
+        : "verified-workflow-2569",
     });
   }
   if (path === "/api/competitions" && method === "GET") {
@@ -345,7 +352,7 @@ async function api(r, env) {
       email = emailOf(b.email),
       name = safeText(b.name, 100),
       school = safeText(b.school, 150),
-      applicantRole = b.applicant_role;
+      applicantRole = simple ? "coach" : b.applicant_role;
     if (
       !validEmail(email) ||
       name.length < 2 ||
@@ -359,7 +366,7 @@ async function api(r, env) {
       hash = await passwordHash(b.password, env.AUTH_SECRET);
     try {
       await env.DB.prepare(
-        "INSERT INTO users(id,email,name,school,password_hash,applicant_role,created_at,school_key) VALUES(?,?,?,?,?,?,?,?)",
+        "INSERT INTO users(id,email,name,school,password_hash,applicant_role,created_at,school_key,approval_status) VALUES(?,?,?,?,?,?,?,?,?)",
       )
         .bind(
           id,
@@ -370,6 +377,7 @@ async function api(r, env) {
           applicantRole,
           now(),
           schoolKey(school),
+          simple ? "approved" : "pending",
         )
         .run();
     } catch (e) {
@@ -393,6 +401,7 @@ async function api(r, env) {
           school,
           applicant_role: applicantRole,
           role: "participant",
+          approval_status: simple ? "approved" : "pending",
         }),
       },
       201,
@@ -758,6 +767,7 @@ async function api(r, env) {
       fail(400, "รายการนี้ต้องเป็นคู่ชาย–หญิง");
     if (
       !draft &&
+      c.workflow_version !== 2 &&
       policy.eligibility_confirmation &&
       b.eligibility_confirmed !== true
     )
@@ -767,7 +777,7 @@ async function api(r, env) {
       fail(400, "รายการนี้ต้องแนบลิงก์ผลงาน");
     if (work && (!work.startsWith("https://") || !URL.canParse(work)))
       fail(400, "ลิงก์ผลงานต้องเป็น HTTPS");
-    if (c.workflow_version && !draft) {
+    if (c.workflow_version === 1 && !draft) {
       for (const [people, purpose] of [
         [students, "student"],
         [coaches, "coach"],
@@ -795,7 +805,7 @@ async function api(r, env) {
     }
     const id = existing?.id || crypto.randomUUID();
     const saved = await env.DB.prepare(
-      "INSERT INTO registrations(id,user_id,competition_id,school,students,coaches,status,created_at,work_url,school_key,eligibility_confirmed) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM competitions WHERE id=? AND (registration_open=1 OR ?=1) AND published=0 AND COALESCE(score_rules,'')=? AND policy_json=? AND min_students=? AND max_students=? AND max_coaches=? AND (workflow_version=0 OR EXISTS(SELECT 1 FROM event_window WHERE id=1 AND CASE WHEN ?=1 THEN edits_until>? ELSE opens_at<=? AND closes_at>? END))) AND EXISTS(SELECT 1 FROM users WHERE id=? AND (approval_status='approved' OR role='admin')) AND NOT EXISTS(SELECT 1 FROM registrations WHERE competition_id=? AND school_key=? AND status='submitted' AND id<>?) ON CONFLICT(user_id,competition_id) DO UPDATE SET students=excluded.students,coaches=excluded.coaches,status=excluded.status,work_url=excluded.work_url,eligibility_confirmed=excluded.eligibility_confirmed,eligibility_reviewed=0,decision='eligible',decision_note='',revision=registrations.revision+1 WHERE (registrations.status='draft' OR ?=1)",
+      "INSERT INTO registrations(id,user_id,competition_id,school,students,coaches,status,created_at,work_url,school_key,eligibility_confirmed,eligibility_reviewed) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM competitions WHERE id=? AND (registration_open=1 OR ?=1) AND published=0 AND COALESCE(score_rules,'')=? AND policy_json=? AND min_students=? AND max_students=? AND max_coaches=? AND (workflow_version=0 OR (workflow_version=2 AND EXISTS(SELECT 1 FROM event_window WHERE id=1 AND opens_at IS NULL AND closes_at IS NULL AND edits_until IS NULL)) OR EXISTS(SELECT 1 FROM event_window WHERE id=1 AND CASE WHEN ?=1 THEN edits_until>? ELSE opens_at<=? AND closes_at>? END))) AND EXISTS(SELECT 1 FROM users WHERE id=? AND (approval_status='approved' OR role='admin')) AND NOT EXISTS(SELECT 1 FROM registrations WHERE competition_id=? AND school_key=? AND status='submitted' AND id<>?) ON CONFLICT(user_id,competition_id) DO UPDATE SET students=excluded.students,coaches=excluded.coaches,status=excluded.status,work_url=excluded.work_url,eligibility_confirmed=excluded.eligibility_confirmed,eligibility_reviewed=excluded.eligibility_reviewed,decision='eligible',decision_note='',revision=registrations.revision+1 WHERE (registrations.status='draft' OR ?=1)",
     )
       .bind(
         id,
@@ -808,7 +818,8 @@ async function api(r, env) {
         now(),
         work,
         schoolKey(user.school),
-        b.eligibility_confirmed === true ? 1 : 0,
+        c.workflow_version === 2 || b.eligibility_confirmed === true ? 1 : 0,
+        c.workflow_version === 2 ? 1 : 0,
         c.id,
         editing ? 1 : 0,
         c.score_rules || "",
@@ -847,16 +858,19 @@ async function api(r, env) {
         id,
         message: draft
           ? "บันทึกฉบับร่างแล้ว"
-          : editing
-            ? "แก้ไขข้อมูลแล้ว รอแอดมินตรวจยืนยันอีกครั้ง"
-            : "ส่งรายการให้แอดมินตรวจสอบแล้ว",
+          : c.workflow_version === 2
+            ? "ลงทะเบียนเรียบร้อยแล้ว รอเข้าร่วมแข่งขันตามกำหนด"
+            : editing
+              ? "แก้ไขข้อมูลแล้ว รอแอดมินตรวจยืนยันอีกครั้ง"
+              : "ส่งรายการให้แอดมินตรวจสอบแล้ว",
       },
       201,
     );
   }
   if (path === "/api/judge/competitions" && method === "GET") {
     approved(user);
-    if (!["judge", "admin"].includes(user.role)) fail(403, "เฉพาะกรรมการ");
+    if (!simple && !["judge", "admin"].includes(user.role))
+      fail(403, "เฉพาะกรรมการ");
     const competitions = (
       await env.DB.prepare(
         "SELECT c.* FROM competitions c WHERE EXISTS(SELECT 1 FROM assignments WHERE competition_id=c.id AND judge_id=?) AND NOT EXISTS(SELECT 1 FROM registrations r WHERE r.competition_id=c.id AND r.status='submitted' AND (r.user_id=? OR r.school_key=?)) ORDER BY c.title",
@@ -868,7 +882,8 @@ async function api(r, env) {
   }
   if (path === "/api/judge/registrations" && method === "GET") {
     approved(user);
-    if (!["judge", "admin"].includes(user.role)) fail(403, "เฉพาะกรรมการ");
+    if (!simple && !["judge", "admin"].includes(user.role))
+      fail(403, "เฉพาะกรรมการ");
     const rows = await env.DB.prepare(
       `SELECT r.*,c.title,c.published,c.score_rules,c.policy_json,c.workflow_version,c.rules_version,c.rules_source_url,s.criteria,s.total,s.comment,s.deduction,s.deduction_reason,s.finalized_at FROM registrations r JOIN competitions c ON c.id=r.competition_id LEFT JOIN scores s ON s.registration_id=r.id AND s.judge_id=? WHERE r.status='submitted' AND r.decision='eligible' AND r.user_id<>? AND r.school_key<>? AND NOT EXISTS(SELECT 1 FROM registrations conflict WHERE conflict.competition_id=r.competition_id AND conflict.status='submitted' AND conflict.school_key=?) AND EXISTS(SELECT 1 FROM assignments a WHERE a.competition_id=c.id AND a.judge_id=?) ORDER BY c.title,r.created_at`,
     )
@@ -899,7 +914,7 @@ async function api(r, env) {
     approved(user);
     const b = await body(r);
     const reg = await env.DB.prepare(
-      `SELECT r.*,c.published,c.workflow_version,c.score_rules,c.policy_json FROM registrations r JOIN competitions c ON c.id=r.competition_id WHERE r.id=? AND r.status='submitted' AND r.decision='eligible' AND r.user_id<>? AND r.school_key<>? AND NOT EXISTS(SELECT 1 FROM registrations conflict WHERE conflict.competition_id=r.competition_id AND conflict.status='submitted' AND conflict.school_key=?) AND EXISTS(SELECT 1 FROM assignments WHERE competition_id=r.competition_id AND judge_id=?)`,
+      `SELECT r.*,c.published,c.registration_open,c.workflow_version,c.score_rules,c.policy_json FROM registrations r JOIN competitions c ON c.id=r.competition_id WHERE r.id=? AND r.status='submitted' AND r.decision='eligible' AND r.user_id<>? AND r.school_key<>? AND NOT EXISTS(SELECT 1 FROM registrations conflict WHERE conflict.competition_id=r.competition_id AND conflict.status='submitted' AND conflict.school_key=?) AND EXISTS(SELECT 1 FROM assignments WHERE competition_id=r.competition_id AND judge_id=?)`,
     )
       .bind(
         safeText(b.registration_id),
@@ -909,7 +924,7 @@ async function api(r, env) {
         user.id,
       )
       .first();
-    if (!["judge", "admin"].includes(user.role) || !reg)
+    if ((!simple && !["judge", "admin"].includes(user.role)) || !reg)
       fail(403, "คุณไม่ได้รับมอบหมายรายการนี้");
     if (reg.published) fail(409, "ประกาศผลแล้ว ไม่สามารถแก้คะแนนได้");
     const oldScore = await env.DB.prepare(
@@ -923,7 +938,12 @@ async function api(r, env) {
     const w = await windowFor(env);
     if (
       reg.workflow_version &&
-      (!w.edits_until || now() < w.edits_until || !reg.eligibility_reviewed)
+      ((reg.workflow_version === 1 && !w.edits_until) ||
+        (w.edits_until && now() < w.edits_until) ||
+        (reg.workflow_version === 2 &&
+          !w.edits_until &&
+          reg.registration_open) ||
+        !reg.eligibility_reviewed)
     )
       fail(409, "ต้องสิ้นสุดเวลาแก้ไขข้อมูลและแอดมินยืนยันทีมก่อนลงคะแนน");
     const values = b.criteria,
@@ -954,7 +974,7 @@ async function api(r, env) {
           10000,
       ) / 100;
     const scoreStatement = env.DB.prepare(
-      `INSERT INTO scores(registration_id,judge_id,criteria,total,comment,created_at,deduction,deduction_reason,finalized_at,registration_revision) SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM registrations r JOIN competitions c ON c.id=r.competition_id JOIN assignments a ON a.competition_id=c.id WHERE r.id=? AND a.judge_id=? AND c.published=0 AND r.status='submitted' AND r.decision='eligible' AND r.user_id<>a.judge_id AND EXISTS(SELECT 1 FROM users WHERE id=a.judge_id AND approval_status='approved') AND r.school_key<>(SELECT school_key FROM users WHERE id=a.judge_id) AND NOT EXISTS(SELECT 1 FROM registrations conflict JOIN users j ON j.id=a.judge_id WHERE conflict.competition_id=r.competition_id AND conflict.status='submitted' AND conflict.school_key=j.school_key) AND (c.workflow_version=0 OR (r.eligibility_reviewed=1 AND EXISTS(SELECT 1 FROM event_window WHERE id=1 AND edits_until<=?)))) ON CONFLICT(registration_id,judge_id) DO UPDATE SET criteria=excluded.criteria,total=excluded.total,comment=excluded.comment,created_at=excluded.created_at,deduction=excluded.deduction,deduction_reason=excluded.deduction_reason,finalized_at=excluded.finalized_at,registration_revision=excluded.registration_revision WHERE scores.finalized_at IS NULL`,
+      `INSERT INTO scores(registration_id,judge_id,criteria,total,comment,created_at,deduction,deduction_reason,finalized_at,registration_revision) SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM registrations r JOIN competitions c ON c.id=r.competition_id JOIN assignments a ON a.competition_id=c.id WHERE r.id=? AND a.judge_id=? AND c.published=0 AND r.status='submitted' AND r.decision='eligible' AND r.user_id<>a.judge_id AND EXISTS(SELECT 1 FROM users WHERE id=a.judge_id AND approval_status='approved') AND r.school_key<>(SELECT school_key FROM users WHERE id=a.judge_id) AND NOT EXISTS(SELECT 1 FROM registrations conflict JOIN users j ON j.id=a.judge_id WHERE conflict.competition_id=r.competition_id AND conflict.status='submitted' AND conflict.school_key=j.school_key) AND (c.workflow_version=0 OR (r.eligibility_reviewed=1 AND EXISTS(SELECT 1 FROM event_window WHERE id=1 AND (edits_until<=? OR (c.workflow_version=2 AND edits_until IS NULL AND c.registration_open=0)))))) ON CONFLICT(registration_id,judge_id) DO UPDATE SET criteria=excluded.criteria,total=excluded.total,comment=excluded.comment,created_at=excluded.created_at,deduction=excluded.deduction,deduction_reason=excluded.deduction_reason,finalized_at=excluded.finalized_at,registration_revision=excluded.registration_revision WHERE scores.finalized_at IS NULL`,
     ).bind(
       reg.id,
       user.id,
@@ -1169,7 +1189,7 @@ async function api(r, env) {
     const id = url.searchParams.get("competition");
     const candidates = (
       await env.DB.prepare(
-        "SELECT j.id,j.name,j.school FROM users j WHERE j.approval_status='approved' AND j.role='judge' AND j.identity_document_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM registrations r WHERE r.competition_id=? AND r.status='submitted' AND (r.user_id=j.id OR r.school_key=j.school_key)) ORDER BY j.name",
+        `SELECT j.id,j.name,j.school FROM users j WHERE j.approval_status='approved' AND (j.role='judge' OR ${simple ? 1 : 0}=1) AND (j.identity_document_id IS NOT NULL OR ${simple ? 1 : 0}=1) AND NOT EXISTS(SELECT 1 FROM registrations r WHERE r.competition_id=? AND r.status='submitted' AND (r.user_id=j.id OR r.school_key=j.school_key)) ORDER BY j.name`,
       )
         .bind(id)
         .all()
@@ -1195,7 +1215,7 @@ async function api(r, env) {
     const n = Math.max(0, target - existing.n);
     const candidates = (
       await env.DB.prepare(
-        "SELECT j.id FROM users j WHERE j.approval_status='approved' AND j.role='judge' AND j.identity_document_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM registrations r WHERE r.competition_id=? AND r.status='submitted' AND (r.user_id=j.id OR r.school_key=j.school_key)) AND NOT EXISTS(SELECT 1 FROM assignments WHERE competition_id=? AND judge_id=j.id) ORDER BY (SELECT COUNT(*) FROM assignments WHERE judge_id=j.id),j.name,j.id LIMIT ?",
+        `SELECT j.id FROM users j WHERE j.approval_status='approved' AND (j.role='judge' OR ${simple ? 1 : 0}=1) AND (j.identity_document_id IS NOT NULL OR ${simple ? 1 : 0}=1) AND NOT EXISTS(SELECT 1 FROM registrations r WHERE r.competition_id=? AND r.status='submitted' AND (r.user_id=j.id OR r.school_key=j.school_key)) AND NOT EXISTS(SELECT 1 FROM assignments WHERE competition_id=? AND judge_id=j.id) ORDER BY (SELECT COUNT(*) FROM assignments WHERE judge_id=j.id),j.name,j.id LIMIT ?`,
       )
         .bind(id, id, n)
         .all()
@@ -1224,13 +1244,13 @@ async function api(r, env) {
     if (!c) fail(404, "ไม่พบรายการ");
     if (c.published) fail(409, "ประกาศผลแล้ว ไม่สามารถเปลี่ยนกรรมการได้");
     const judge = await env.DB.prepare(
-      "SELECT id FROM users WHERE id=? AND role IN ('judge','admin') AND approval_status='approved'",
+      `SELECT id FROM users WHERE id=? AND (role IN ('judge','admin') OR ${simple ? 1 : 0}=1) AND approval_status='approved'`,
     )
       .bind(safeText(b.judge_id))
       .first();
     if (!judge) fail(400, "บัญชีนี้ยังไม่มีสิทธิ์กรรมการ");
     if (
-      c.workflow_version &&
+      c.workflow_version === 1 &&
       !b.remove &&
       !(await env.DB.prepare(
         "SELECT 1 FROM users WHERE id=? AND role='judge' AND identity_document_id IS NOT NULL",
@@ -1304,7 +1324,7 @@ async function api(r, env) {
         source.rules_source_url,
         source.rules_version,
         source.policy_json,
-        1,
+        simple ? 2 : 1,
       )
       .run();
     return json(

@@ -1,7 +1,7 @@
-import IdentityUpload, { uploadIdentity } from "./components/IdentityUpload";
+import TeacherHome from "./components/TeacherHome";
+import RegistrationForm from "./components/TeamRegistration";
 import AccountVerification from "./components/AccountVerification";
 import EventWindow from "./components/EventWindow";
-import JudgeHome from "./components/JudgeHome";
 import CompetitionPolicy from "./components/CompetitionPolicy";
 import ruleSources from "./rules-sources.json";
 import AdminOperations from "./components/AdminOperations";
@@ -51,7 +51,7 @@ const nav = [
   ["/", "หน้าแรก", House],
   ["/competitions", "รายการแข่งขัน", Trophy],
   ["/registrations", "ลงทะเบียน", ClipboardText],
-  ["/account", "ยืนยันบัญชี / หลักฐาน", UserCircle],
+  ["/account", "บัญชีครู", UserCircle],
   ["/results", "ผลการแข่งขัน", ChartBar],
   ["/certificates", "ประกาศนียบัตร", Certificate],
 ];
@@ -110,8 +110,6 @@ function AuthPage({ mode, setMode, onClose, onUser }) {
     setSuccess("");
     setBusy(true);
     const data = Object.fromEntries(new FormData(e.currentTarget));
-    const identityFile = data.identity_file;
-    delete data.identity_file;
     try {
       if (mode === "register" && data.password !== data.confirm)
         throw new Error("รหัสผ่านทั้งสองช่องไม่ตรงกัน");
@@ -120,16 +118,6 @@ function AuthPage({ mode, setMode, onClose, onUser }) {
         data,
       );
       if (result.user) {
-        if (mode === "register") {
-          try {
-            await uploadIdentity(identityFile, "account");
-            result.user = (await api("/auth/me")).user;
-          } catch {
-            onUser(result.user);
-            onClose();
-            return;
-          }
-        }
         onUser(result.user);
         onClose();
       } else setSuccess(result.message);
@@ -193,18 +181,9 @@ function AuthPage({ mode, setMode, onClose, onUser }) {
                   placeholder="ระบุชื่อ–นามสกุล"
                 />
               </Field>
-              <Field label="สมัครเป็น">
-                <select name="applicant_role" required defaultValue="">
-                  <option value="" disabled>
-                    เลือกบทบาท
-                  </option>
-                  <option value="judge">กรรมการ</option>
-                  <option value="coach">บัญชีโรงเรียน / ผู้ฝึกซ้อม</option>
-                </select>
-                <small>
-                  สิทธิ์กรรมการจะเปิดใช้งานเมื่อผู้ดูแลกำหนดสิทธิ์ให้
-                </small>
-              </Field>
+              <p className="helper">
+                บัญชีครูเดียวใช้ลงทะเบียนทีมและรับงานกรรมการที่ผู้จัดมอบหมายได้
+              </p>
               <Field label="โรงเรียนที่สังกัด">
                 <input
                   name="school"
@@ -216,19 +195,6 @@ function AuthPage({ mode, setMode, onClose, onUser }) {
                 <small>ใช้ระบุโรงเรียนในรายการสมัครแข่งขันของคุณ</small>
               </Field>
             </>
-          )}
-          {mode === "register" && (
-            <Field label="ภาพถ่ายบัตรประชาชนของผู้สมัครบัญชี">
-              <input
-                name="identity_file"
-                type="file"
-                accept="image/jpeg,image/png"
-                required
-              />
-              <small>
-                ใช้ตรวจยืนยันบัญชีโดยแอดมินเท่านั้น ภาพจะไม่เปิดสาธารณะ
-              </small>
-            </Field>
           )}
           <Field label="อีเมล">
             <input
@@ -721,359 +687,6 @@ function CompetitionDetail({ c, onRegister }) {
     </>
   );
 }
-function RegistrationForm({ c, user, onSaved, existing }) {
-  const [students, setStudents] = useState(
-      existing?.students ||
-        Array.from({ length: c.min_students || 1 }, () => ({
-          name: "",
-          grade: "",
-        })),
-    ),
-    [coaches, setCoaches] = useState(
-      existing?.coaches ||
-        Array.from({ length: c.policy?.min_coaches || 1 }, (_, i) => ({
-          name: i === 0 ? user.name : "",
-        })),
-    ),
-    [work, setWork] = useState(existing?.work_url || ""),
-    [confirmed, setConfirmed] = useState(!!existing?.eligibility_confirmed),
-    [review, setReview] = useState(false),
-    [error, setError] = useState(""),
-    [busy, setBusy] = useState(false);
-  async function save(status) {
-    setBusy(true);
-    setError("");
-    try {
-      const r = await api("/registrations", {
-        competition_id: c.id,
-        students,
-        coaches,
-        status,
-        work_url: work,
-        eligibility_confirmed: confirmed,
-      });
-      onSaved(r.message);
-      go("/registrations");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  function next(e) {
-    e.preventDefault();
-    setReview(true);
-    window.scrollTo(0, 0);
-  }
-  return (
-    <>
-      <button
-        className="text-button back"
-        onClick={() => go("/competitions/" + c.id)}
-      >
-        <ArrowLeft size={18} /> {c.title}
-      </button>
-      <h1>{review ? "ตรวจสอบก่อนยืนยัน" : "ลงทะเบียนแข่งขัน"}</h1>
-      <p className="muted">
-        {user.school} · {c.title} {c.grade}
-      </p>
-      <div className="registration-layout">
-        <form onSubmit={next}>
-          <div className="selected-competition">
-            <BookOpen size={25} />
-            <div>
-              <h2>
-                {c.title} {c.grade}
-              </h2>
-              <p>
-                นักเรียนไม่เกิน {c.max_students} คน · ครูไม่เกิน {c.max_coaches}{" "}
-                คน
-              </p>
-            </div>
-          </div>
-          <Message text={error} />
-          <Field label="โรงเรียนที่ส่งเข้าแข่งขัน">
-            <input readOnly value={user.school} />
-          </Field>
-          {c.policy?.eligibility_confirmation && (
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={confirmed}
-                disabled={review}
-                required
-                onChange={(e) => setConfirmed(e.target.checked)}
-              />
-              ข้าพเจ้าอ่านเกณฑ์ปี 2568
-              และยืนยันว่าผู้เข้าแข่งขันมีคุณสมบัติตรงตามรายการ โรงเรียน
-              และประเภทที่เลือก พร้อมแสดงเอกสารให้ผู้จัดตรวจหน้างาน
-            </label>
-          )}
-          <div className="section-title">
-            <h2>รายชื่อนักเรียน ({students.length} คน)</h2>
-            {!review && (
-              <Button
-                type="button"
-                disabled={students.length >= c.max_students}
-                onClick={() =>
-                  setStudents([...students, { name: "", grade: "" }])
-                }
-              >
-                <Plus size={17} /> เพิ่มนักเรียน
-              </Button>
-            )}
-          </div>
-          {students.map((s, i) => (
-            <div className="person-row" key={i}>
-              <span className="row-number">{i + 1}</span>
-              <Field label="ชื่อ–นามสกุลนักเรียน">
-                <input
-                  aria-label={"ชื่อนักเรียน " + (i + 1)}
-                  required
-                  minLength={2}
-                  maxLength={100}
-                  readOnly={review}
-                  value={s.name}
-                  onChange={(e) =>
-                    setStudents(
-                      students.map((x, j) =>
-                        j === i ? { ...x, name: e.target.value } : x,
-                      ),
-                    )
-                  }
-                />
-              </Field>
-              {c.policy?.age_min ? (
-                <Field label="อายุที่ครูยืนยัน (ปี)">
-                  <input
-                    aria-label={"อายุนักเรียน " + (i + 1)}
-                    type="number"
-                    min={c.policy.age_min}
-                    max={c.policy.age_max}
-                    required
-                    readOnly={review}
-                    value={s.age ?? ""}
-                    onChange={(e) =>
-                      setStudents(
-                        students.map((x, j) =>
-                          j === i ? { ...x, age: Number(e.target.value) } : x,
-                        ),
-                      )
-                    }
-                  />
-                </Field>
-              ) : (
-                <Field label="ระดับชั้น">
-                  <select
-                    aria-label={"ระดับชั้น " + (i + 1)}
-                    disabled={review}
-                    value={s.grade}
-                    required
-                    onChange={(e) =>
-                      setStudents(
-                        students.map((x, j) =>
-                          j === i ? { ...x, grade: e.target.value } : x,
-                        ),
-                      )
-                    }
-                  >
-                    <option value="">เลือกชั้น</option>
-                    {(
-                      c.policy?.allowed_grades ||
-                      (c.grade === "ป.4–6"
-                        ? ["ป.4", "ป.5", "ป.6"]
-                        : ["ป.1", "ป.2", "ป.3", "ป.4", "ป.5", "ป.6"])
-                    ).map((g) => (
-                      <option key={g}>{g}</option>
-                    ))}
-                  </select>
-                </Field>
-              )}
-              {(c.policy?.gender || c.policy?.mixed_gender_pair) && (
-                <Field label="ประเภทชาย/หญิงตามรายการ">
-                  <select
-                    aria-label={"ประเภทนักเรียน " + (i + 1)}
-                    required
-                    disabled={review}
-                    value={s.gender || ""}
-                    onChange={(e) =>
-                      setStudents(
-                        students.map((x, j) =>
-                          j === i ? { ...x, gender: e.target.value } : x,
-                        ),
-                      )
-                    }
-                  >
-                    <option value="">เลือกประเภท</option>
-                    {(c.policy.gender
-                      ? [c.policy.gender]
-                      : ["ชาย", "หญิง"]
-                    ).map((g) => (
-                      <option key={g}>{g}</option>
-                    ))}
-                  </select>
-                </Field>
-              )}
-              {c.workflow_version === 1 && (
-                <IdentityUpload
-                  label={"ภาพบัตรผู้แข่งขัน " + (i + 1)}
-                  value={s.evidence_id}
-                  disabled={review}
-                  onChange={(id) =>
-                    setStudents((previous) =>
-                      previous.map((x, j) =>
-                        i === j ? { ...x, evidence_id: id } : x,
-                      ),
-                    )
-                  }
-                />
-              )}
-              {!review && (
-                <button
-                  type="button"
-                  className="icon-button danger"
-                  disabled={students.length <= (c.min_students || 1)}
-                  aria-label={"ลบนักเรียน " + (i + 1)}
-                  onClick={() =>
-                    setStudents(students.filter((_, j) => i !== j))
-                  }
-                >
-                  <Trash size={20} />
-                </button>
-              )}
-            </div>
-          ))}
-          <div className="section-title">
-            <h2>ครูผู้ฝึกซ้อม ({coaches.length} คน)</h2>
-            {!review && (
-              <Button
-                type="button"
-                disabled={coaches.length >= c.max_coaches}
-                onClick={() => setCoaches([...coaches, { name: "" }])}
-              >
-                <Plus size={17} /> เพิ่มครู
-              </Button>
-            )}
-          </div>
-          {coaches.map((s, i) => (
-            <div className="person-row coach" key={i}>
-              <span className="row-number">{i + 1}</span>
-              <Field label="ชื่อ–นามสกุลครู">
-                <input
-                  aria-label={"ชื่อครู " + (i + 1)}
-                  required
-                  minLength={2}
-                  maxLength={100}
-                  readOnly={review}
-                  value={s.name}
-                  onChange={(e) =>
-                    setCoaches(
-                      coaches.map((x, j) =>
-                        j === i ? { ...x, name: e.target.value } : x,
-                      ),
-                    )
-                  }
-                />
-              </Field>
-              {c.workflow_version === 1 && (
-                <IdentityUpload
-                  purpose="coach"
-                  label={"ภาพบัตรครูผู้ฝึกซ้อม " + (i + 1)}
-                  value={s.evidence_id}
-                  disabled={review}
-                  accountEvidence={user.identity_document_id}
-                  onChange={(id) =>
-                    setCoaches((previous) =>
-                      previous.map((x, j) =>
-                        i === j ? { ...x, evidence_id: id } : x,
-                      ),
-                    )
-                  }
-                />
-              )}
-              {!review && (
-                <button
-                  type="button"
-                  className="icon-button danger"
-                  disabled={coaches.length <= (c.policy?.min_coaches || 1)}
-                  aria-label={"ลบครู " + (i + 1)}
-                  onClick={() => setCoaches(coaches.filter((_, j) => i !== j))}
-                >
-                  <Trash size={20} />
-                </button>
-              )}
-            </div>
-          ))}
-          <Field
-            label={
-              c.policy?.work_required
-                ? "ลิงก์ผลงาน (จำเป็น)"
-                : "ลิงก์ผลงาน (ถ้ามี)"
-            }
-          >
-            <input
-              type="url"
-              value={work}
-              placeholder="https://…"
-              maxLength={1000}
-              required={!!c.policy?.work_required}
-              readOnly={review}
-              onChange={(e) => setWork(e.target.value)}
-            />
-            <small>แนบลิงก์ไฟล์หรือแฟ้มผลงานที่ผู้จัดสามารถเปิดดูได้</small>
-          </Field>
-          <div className="form-actions">
-            {review ? (
-              <>
-                <Button type="button" onClick={() => setReview(false)}>
-                  กลับไปแก้ไข
-                </Button>
-                <Button
-                  type="button"
-                  disabled={busy}
-                  variant="primary"
-                  onClick={() => save("submitted")}
-                >
-                  ยืนยันลงทะเบียน <CheckCircle size={20} />
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => save("draft")}
-                >
-                  <FloppyDisk size={18} /> บันทึกฉบับร่าง
-                </Button>
-                <Button variant="primary" type="submit">
-                  ตรวจสอบข้อมูล <ArrowRight size={20} />
-                </Button>
-              </>
-            )}
-          </div>
-        </form>
-        <aside className="helper-panel">
-          <h3>ก่อนส่งรายการ</h3>
-          <p>
-            ตรวจสอบการสะกดชื่อและโรงเรียนให้ถูกต้อง
-            ข้อมูลจะใช้ในผลการแข่งขันและประกาศนียบัตร
-          </p>
-          <hr />
-          <h3>{user.school}</h3>
-          <p>
-            ผู้ประสานงาน
-            <br />
-            {user.name}
-          </p>
-          <p>
-            ส่งรายการแล้วจะไม่สามารถแก้ไขเองได้ กรุณาติดต่อผู้จัดหากต้องการแก้ไข
-          </p>
-        </aside>
-      </div>
-    </>
-  );
-}
 function Registrations({ rows, loading, error, competitions }) {
   return (
     <>
@@ -1082,7 +695,7 @@ function Registrations({ rows, loading, error, competitions }) {
           <h1>รายการลงทะเบียนของฉัน</h1>
           <p>ติดตามรายการแข่งขัน นักเรียน และครูผู้ฝึกซ้อม</p>
         </div>
-        <Button variant="primary" onClick={() => go("/")}>
+        <Button variant="primary" onClick={() => go("/competitions")}>
           <Plus size={18} /> เพิ่มรายการ
         </Button>
       </div>
@@ -1091,7 +704,7 @@ function Registrations({ rows, loading, error, competitions }) {
         <p>กำลังโหลด…</p>
       ) : !rows.length ? (
         <Empty title="ยังไม่มีรายการลงทะเบียน">
-          เลือกการแข่งขันที่หน้าแรกเพื่อเริ่มสมัคร
+          เลือกเมนูรายการแข่งขันเพื่อเริ่มสมัคร
         </Empty>
       ) : (
         <div className="table-scroll">
@@ -1112,6 +725,16 @@ function Registrations({ rows, loading, error, competitions }) {
                       {r.title} {r.grade}
                     </strong>
                     <small>{r.school}</small>
+                    <small>
+                      วันเวลา:{" "}
+                      {competitions.find((c) => c.id === r.competition_id)
+                        ?.schedule || "รอประกาศ"}
+                    </small>
+                    <small>
+                      สถานที่:{" "}
+                      {competitions.find((c) => c.id === r.competition_id)
+                        ?.venue || "รอประกาศ"}
+                    </small>
                   </td>
                   <td>
                     {r.students.length} คน / {r.coaches.length} คน
@@ -1122,7 +745,11 @@ function Registrations({ rows, loading, error, competitions }) {
                         "badge " + (r.status === "draft" ? "yellow" : "green")
                       }
                     >
-                      {r.status === "draft" ? "ฉบับร่าง" : "ส่งแล้ว"}
+                      {r.status === "draft"
+                        ? "ฉบับร่าง"
+                        : r.published
+                          ? "ประกาศผลแล้ว"
+                          : "ลงทะเบียนแล้ว · รอแข่งขัน"}
                     </span>
                   </td>
                   <td>
@@ -1179,7 +806,7 @@ function Results({ rows, competitions }) {
       </div>
       {!list.length ? (
         <Empty icon={Trophy} title="ยังไม่มีผลการแข่งขัน">
-          เมื่อกรรมการให้คะแนนครบและผู้จัดยืนยันผล คะแนนและรางวัลจะแสดงที่นี่
+          เมื่อกรรมการทุกคนส่งคะแนนขั้นสุดท้ายครบ ระบบจะแสดงคะแนนและรางวัลที่นี่
         </Empty>
       ) : (
         <div className="table-scroll">
@@ -1200,6 +827,16 @@ function Results({ rows, competitions }) {
                   <td>
                     <strong>{r.title}</strong>
                     <small>{r.school}</small>
+                    <small>
+                      วันเวลา:{" "}
+                      {competitions.find((c) => c.id === r.competition_id)
+                        ?.schedule || "รอประกาศ"}
+                    </small>
+                    <small>
+                      สถานที่:{" "}
+                      {competitions.find((c) => c.id === r.competition_id)
+                        ?.venue || "รอประกาศ"}
+                    </small>
                   </td>
                   <td>
                     {r.students.map((s) => (
@@ -1405,6 +1042,16 @@ function Judge({ notify }) {
                   <td>
                     <strong>{r.title}</strong>
                     <small>{r.school}</small>
+                    <small>
+                      วันเวลา:{" "}
+                      {competitions.find((c) => c.id === r.competition_id)
+                        ?.schedule || "รอประกาศ"}
+                    </small>
+                    <small>
+                      สถานที่:{" "}
+                      {competitions.find((c) => c.id === r.competition_id)
+                        ?.venue || "รอประกาศ"}
+                    </small>
                   </td>
                   <td>
                     {r.students.map((s) => (
@@ -1590,7 +1237,8 @@ function Admin({ competitions, reload, notify }) {
     <>
       <h1>จัดการสิทธิ์และการแข่งขัน</h1>
       <p className="muted">
-        กำหนดบทบาท มอบหมายกรรมการ และยืนยันผลก่อนออกประกาศนียบัตร
+        ครูลงทะเบียนทีมได้ทันที ผู้จัดเปิดรับสมัคร กำหนดเวลา
+        และมอบหมายงานกรรมการ
       </p>
       <div className="tabs">
         {[
@@ -1616,19 +1264,12 @@ function Admin({ competitions, reload, notify }) {
       {tab === "users" && (
         <>
           <p className="helper">
-            บทบาทที่สมัครแสดงตามข้อมูลผู้สมัคร
-            ผู้ดูแลเป็นผู้กำหนดสิทธิ์ใช้งานจริง
+            บัญชีครูใช้ลงทะเบียนทีมและรับงานกรรมการได้
+            ผู้จัดมอบหมายรายการได้โดยตรง
           </p>
           <ApplicantTable
             users={users}
             busy={busy}
-            onApprove={(userId, status, note) =>
-              action(
-                "/admin/approve-user",
-                { user_id: userId, status, note },
-                "บันทึกผลตรวจบัญชีแล้ว",
-              )
-            }
             onRoleChange={(userId, role) =>
               action(
                 "/admin/role",
@@ -1685,7 +1326,6 @@ function Admin({ competitions, reload, notify }) {
                 {users
                   .filter(
                     (u) =>
-                      ["judge", "admin"].includes(u.role) &&
                       u.approval_status === "approved" &&
                       (candidateIds === null || candidateIds.includes(u.id)),
                   )
@@ -2163,8 +1803,17 @@ export function App() {
     (user.role !== "admin" && user.approval_status !== "approved")
   )
     content = <AccountVerification user={user} onUser={setUser} />;
-  else if (path === "/" && user.role === "judge")
-    content = <JudgeHome navigate={go} />;
+  else if (path === "/")
+    content = (
+      <TeacherHome
+        user={user}
+        registrations={registrations}
+        competitions={competitions}
+        loading={loading || dataLoading}
+        error={error || dataError}
+        navigate={go}
+      />
+    );
   else if (path === "/registrations")
     content = (
       <Registrations
@@ -2189,11 +1838,12 @@ export function App() {
       </>
     );
   else if (path === "/judge")
-    content = ["judge", "admin"].includes(user.role) ? (
-      <Judge notify={notify} />
-    ) : (
-      <Empty title="ไม่มีสิทธิ์เข้าถึง">เฉพาะกรรมการที่ผู้จัดมอบหมาย</Empty>
-    );
+    content =
+      user.simple_workflow || ["judge", "admin"].includes(user.role) ? (
+        <Judge notify={notify} />
+      ) : (
+        <Empty title="ไม่มีสิทธิ์เข้าถึง">เฉพาะกรรมการที่ผู้จัดมอบหมาย</Empty>
+      );
   else if (path === "/admin")
     content =
       user.role === "admin" ? (
@@ -2339,36 +1989,38 @@ export function App() {
                 <span>{label}</span>
               </a>
             ))}
-            {user && ["judge", "admin"].includes(user.role) && (
-              <>
-                <div className="nav-divider" />
-                <p className="nav-label">สำหรับผู้ดูแล</p>
-                <a
-                  href="/judge"
-                  className={path === "/judge" ? "active" : ""}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    go("/judge");
-                  }}
-                >
-                  <Star size={26} />
-                  ให้คะแนน
-                </a>
-                {user.role === "admin" && (
+            {user &&
+              (user.simple_workflow ||
+                ["judge", "admin"].includes(user.role)) && (
+                <>
+                  <div className="nav-divider" />
+                  <p className="nav-label">หน้าที่เพิ่มเติม</p>
                   <a
-                    href="/admin"
-                    className={path === "/admin" ? "active" : ""}
+                    href="/judge"
+                    className={path === "/judge" ? "active" : ""}
                     onClick={(e) => {
                       e.preventDefault();
-                      go("/admin");
+                      go("/judge");
                     }}
                   >
-                    <Users size={26} />
-                    จัดการสิทธิ์
+                    <Star size={26} />
+                    ให้คะแนน
                   </a>
-                )}
-              </>
-            )}
+                  {user.role === "admin" && (
+                    <a
+                      href="/admin"
+                      className={path === "/admin" ? "active" : ""}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        go("/admin");
+                      }}
+                    >
+                      <Users size={26} />
+                      จัดการสิทธิ์
+                    </a>
+                  )}
+                </>
+              )}
           </nav>
           <div className="sidebar-footer">
             <span>ศิลปหัตถกรรมนักเรียน</span>

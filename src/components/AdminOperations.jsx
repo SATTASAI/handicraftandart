@@ -250,19 +250,22 @@ export default function AdminOperations({ data, refresh, notify }) {
                       ? r.eligibility_reviewed
                         ? r.decision === "disqualified"
                           ? "ตัดสิทธิ์"
-                          : "ตรวจคุณสมบัติแล้ว"
+                          : "ลงทะเบียนแล้ว · รอแข่งขัน"
                         : "รอผู้จัดตรวจคุณสมบัติ"
                       : "ฉบับร่าง"}
                     {r.decision_note && <p>{r.decision_note}</p>}
                     {r.status === "submitted" && !r.published && (
                       <div className="row-actions">
-                        <button
-                          className="btn"
-                          disabled={busy}
-                          onClick={() => decision(r, "eligible")}
-                        >
-                          ยืนยันคุณสมบัติผ่าน
-                        </button>
+                        {(!r.eligibility_reviewed ||
+                          r.decision === "disqualified") && (
+                          <button
+                            className="btn"
+                            disabled={busy}
+                            onClick={() => decision(r, "eligible")}
+                          >
+                            คืนสิทธิ์ / รับทีม
+                          </button>
+                        )}
                         <button
                           className="btn"
                           disabled={busy}
