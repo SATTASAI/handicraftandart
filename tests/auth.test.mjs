@@ -269,8 +269,11 @@ test("signup validation, cross-origin protection, body limits and rate limits", 
     (await request("/signup", account("valid@example.test", ["coach"]))).status,
     201,
   );
-  assert.equal(
-    (await request("/signup", account("limited@example.test"))).status,
-    429,
-  );
+  // Per-IP signup limit is generous (shared school Wi-Fi) but still enforced.
+  let limited;
+  for (let i = 0; i < 60 && limited !== 429; i++)
+    limited = (
+      await request("/signup", account(`bulk${i}@example.test`, ["coach"]))
+    ).status;
+  assert.equal(limited, 429);
 });
