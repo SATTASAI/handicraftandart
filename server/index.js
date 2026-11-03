@@ -80,9 +80,10 @@ async function currentUser(r, db) {
     .bind(await digest(token), now())
     .first();
 }
-async function limit(db, r, action, maximum, seconds) {
+async function limit(db, r, action, maximum, seconds, perIp = true) {
   const key = await digest(
-    action + ":" + (r.headers.get("CF-Connecting-IP") || "local"),
+    action +
+      (perIp ? ":" + (r.headers.get("CF-Connecting-IP") || "local") : ""),
   );
   const t = now();
   const result = await db
@@ -119,7 +120,8 @@ async function api(r, env) {
   if (path === "/api/me" && r.method === "GET")
     return json({ user: publicUser(await currentUser(r, db)) });
   if (path === "/api/signup" && r.method === "POST") {
-    await limit(db, r, "signup", 10, 3600);
+    // Schools share one public IP on network Wi-Fi; keep per-IP limits generous.
+    await limit(db, r, "signup", 60, 3600);
     const b = await body(r);
     const name = typeof b.name === "string" ? b.name.trim() : "",
       school = typeof b.school === "string" ? b.school.trim() : "",
@@ -193,9 +195,14 @@ async function api(r, env) {
     });
   }
   if (path === "/api/login" && r.method === "POST") {
-    await limit(db, r, "login", 20, 900);
+    await limit(db, r, "login", 120, 900);
     const b = await body(r),
       email = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
+    await limit(db, r, "login-email:" + email, 20, 900, false);
+    await db.batch([
+      db.prepare("DELETE FROM account_sessions WHERE expires_at<?").bind(now()),
+      db.prepare("DELETE FROM account_limits WHERE resets_at<?").bind(now()),
+    ]);
     if (
       typeof b.password !== "string" ||
       b.password.length > 128 ||

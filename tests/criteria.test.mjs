@@ -83,7 +83,7 @@ async function runtime(t, beforeCatalog) {
   return { mf, db, call, signup, upload };
 }
 const student = (id) => ({
-  first_name: "นักเรียน",
+  first_name: "นักเรียน " + String(id).slice(0, 8),
   last_name: "ทดสอบ",
   grade: "ป.4",
   school: "โรงเรียนทดสอบ",
