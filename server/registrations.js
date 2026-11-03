@@ -1,5 +1,31 @@
+import { activationSql } from "./catalog.js";
 import { now, digest, publicUser } from "./security.js";
 const MAX_IMAGE = 1048576;
+function effectiveCounts(row) {
+  return row
+    ? {
+        ...row,
+        min_students: row.roster_min_students ?? row.min_students,
+        max_students:
+          row.roster_min_students == null
+            ? row.max_students
+            : row.roster_max_students,
+      }
+    : null;
+}
+function competitionView(row) {
+  row = effectiveCounts(row);
+  if (!row) return null;
+  const { rules_json, ...safe } = row;
+  return { ...safe, rules: rules_json ? JSON.parse(rules_json) : {} };
+}
+const primaryGrade = (value) =>
+  value
+    .normalize("NFKC")
+    .replace(/[๐-๙]/g, (c) => String(c.charCodeAt(0) - 3664))
+    .replace(/\s+/g, "")
+    .replace(/^ประถมศึกษาปีที่/, "ป.")
+    .replace(/^ป(?=[1-6]$)/, "ป.");
 const text = (value, max) =>
   typeof value === "string" ? value.trim().slice(0, max + 1) : "";
 const uuid = (value) =>
@@ -8,18 +34,27 @@ const uuid = (value) =>
 async function details(db, id) {
   const registration = await db
     .prepare(
-      "SELECT r.*,c.title,c.grade_label,c.venue,c.starts_at,c.registration_open,u.name AS coach_name,u.school AS coach_school,u.email AS coach_email,v.name AS reviewer_name FROM event_registrations r JOIN event_competitions c ON c.id=r.competition_id JOIN account_users u ON u.id=r.owner_id LEFT JOIN account_users v ON v.id=r.reviewed_by WHERE r.id=?",
+      "SELECT r.*,c.title,c.grade_label,c.venue,c.starts_at,c.registration_open,c.rules_json AS competition_rules_json,u.name AS coach_name,u.school AS coach_school,u.email AS coach_email,v.name AS reviewer_name FROM event_registrations r JOIN event_competitions c ON c.id=r.competition_id JOIN account_users u ON u.id=r.owner_id LEFT JOIN account_users v ON v.id=r.reviewed_by WHERE r.id=?",
     )
     .bind(id)
     .first();
   if (!registration) return null;
-  const { write_token, payload_hash, request_id, ...safe } = registration;
+  const {
+    write_token,
+    payload_hash,
+    request_id,
+    coaches_json,
+    competition_rules_json,
+    ...safe
+  } = registration;
   return {
     ...safe,
+    coaches: JSON.parse(coaches_json || "[]"),
+    competition_rules: JSON.parse(competition_rules_json || "{}"),
     students: (
       await db
         .prepare(
-          "SELECT id,position,first_name,last_name,grade,school,document_id FROM event_students WHERE registration_id=? ORDER BY position",
+          "SELECT id,position,first_name,last_name,grade,school,document_id,gender FROM event_students WHERE registration_id=? ORDER BY position",
         )
         .bind(id)
         .all()
@@ -101,16 +136,45 @@ export async function registrationsApi(
       ),
     });
   }
-  if (path === "/api/competitions" && method === "GET")
+  if (path === "/api/competitions" && method === "GET") {
+    if (
+      await db
+        .prepare(
+          "SELECT 1 FROM competition_catalog c WHERE NOT EXISTS(SELECT 1 FROM event_competitions e WHERE e.catalog_key=c.catalog_key) LIMIT 1",
+        )
+        .first()
+    )
+      await db.prepare(activationSql).run();
     return json({
       competitions: (
         await db
           .prepare(
-            "SELECT * FROM event_competitions ORDER BY created_at DESC,id",
+            "SELECT c.*,s.name AS source_name,s.url AS source_url FROM event_competitions c LEFT JOIN competition_rule_sources s ON s.key=c.source_key ORDER BY c.catalog_key IS NULL DESC,c.category,c.title,c.grade_label,c.id",
           )
           .all()
-      ).results,
+      ).results.map(competitionView),
     });
+  }
+  const rulesMatch = path.match(/^\/api\/competitions\/([a-zA-Z0-9-]+)$/);
+  if (rulesMatch && method === "GET") {
+    const row = await db
+      .prepare(
+        "SELECT c.*,s.name AS source_name,s.url AS source_url,rs.text_json AS section_text_json,gs.text_json AS general_text_json FROM event_competitions c LEFT JOIN competition_rule_sources s ON s.key=c.source_key LEFT JOIN competition_rule_sections rs ON rs.key=c.section_key LEFT JOIN competition_rule_sections gs ON gs.key=json_extract(c.rules_json,'$.general_section_key') WHERE c.id=?",
+      )
+      .bind(rulesMatch[1])
+      .first();
+    if (!row) fail(404, "ไม่พบรายการแข่งขัน");
+    const { section_text_json, general_text_json, ...competition } = row;
+    return json({
+      competition: {
+        ...competitionView(competition),
+        rules_text: section_text_json ? JSON.parse(section_text_json) : "",
+        general_rules_text: general_text_json
+          ? JSON.parse(general_text_json)
+          : "",
+      },
+    });
+  }
   if (path === "/api/admin/competitions" && method === "POST") {
     if (!superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
     const b = await body(r),
@@ -131,15 +195,18 @@ export async function registrationsApi(
       !Number.isInteger(min) ||
       !Number.isInteger(max) ||
       min < 1 ||
+      min > 1000 ||
       max < min ||
-      max > 20
+      max > 1000
     )
-      fail(400, "กรอกชื่อรายการและจำนวนผู้แข่งขัน 1–20 คนให้ถูกต้อง");
+      fail(400, "กรอกชื่อรายการและจำนวนผู้แข่งขัน 1–1000 คนให้ถูกต้อง");
     if (starts && !Number.isFinite(Date.parse(starts)))
       fail(400, "วันเวลาแข่งขันไม่ถูกต้อง");
     const id = crypto.randomUUID();
     await db
-      .prepare("INSERT INTO event_competitions VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+      .prepare(
+        "INSERT INTO event_competitions(id,title,description,grade_label,venue,starts_at,min_students,max_students,registration_open,created_by,created_at,roster_min_students,roster_max_students) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      )
       .bind(
         id,
         title,
@@ -147,17 +214,19 @@ export async function registrationsApi(
         grade,
         venue,
         starts,
-        min,
-        max,
+        Math.min(min, 20),
+        Math.min(max, 20),
         b.registration_open === false ? 0 : 1,
         user.id,
         now(),
+        min,
+        max,
       )
       .run();
     return json({ id }, 201);
   }
   const competitionMatch = path.match(
-    /^\/api\/admin\/competitions\/([a-f0-9-]+)$/i,
+    /^\/api\/admin\/competitions\/([a-zA-Z0-9-]+)$/i,
   );
   if (competitionMatch && method === "POST") {
     if (!superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
@@ -270,7 +339,7 @@ export async function registrationsApi(
     method === "POST"
   ) {
     requireCoach();
-    const b = await body(r, 65536),
+    const b = await body(r, 262144),
       editing = Boolean(registrationMatch);
     const existing = editing
       ? await db
@@ -286,25 +355,48 @@ export async function registrationsApi(
     if (editing && b.revision !== existing.revision)
       fail(409, "ข้อมูลเปลี่ยนแล้ว กรุณาโหลดรายการใหม่");
     const competitionId = existing?.competition_id || b.competition_id;
-    const competition = await db
-      .prepare("SELECT * FROM event_competitions WHERE id=?")
-      .bind(typeof competitionId === "string" ? competitionId : "")
-      .first();
+    const competition = effectiveCounts(
+      await db
+        .prepare("SELECT * FROM event_competitions WHERE id=?")
+        .bind(typeof competitionId === "string" ? competitionId : "")
+        .first(),
+    );
     if (!competition) fail(404, "ไม่พบรายการแข่งขัน");
     if (!competition.registration_open) fail(409, "รายการนี้ปิดรับสมัครแล้ว");
     if (
       !Array.isArray(b.students) ||
       b.students.length < competition.min_students ||
-      b.students.length > competition.max_students
+      (competition.max_students != null &&
+        b.students.length > competition.max_students)
     )
       fail(
         400,
-        `รายการนี้ต้องมีนักเรียน ${competition.min_students}–${competition.max_students} คน`,
+        competition.max_students == null
+          ? `รายการนี้ต้องมีนักเรียนอย่างน้อย ${competition.min_students} คน`
+          : `รายการนี้ต้องมีนักเรียน ${competition.min_students}–${competition.max_students} คน`,
       );
+    const rules = JSON.parse(competition.rules_json || "{}"),
+      policy = rules.policy || {};
+    const variant = policy.team_variants ? text(b.variant, 50) : "";
+    if (policy.team_variants) {
+      const selected = policy.team_variants.find((v) => v.key === variant);
+      if (!selected) fail(400, "เลือกชุดการแสดงตามเกณฑ์รายการ");
+      if (
+        b.students.length < selected.min_students ||
+        b.students.length > selected.max_students
+      )
+        fail(
+          400,
+          `${selected.label} ต้องมีนักเรียน ${selected.min_students}–${selected.max_students} คน`,
+        );
+    }
     const students = b.students.map((s) => ({
       first_name: text(s?.first_name, 100),
       last_name: text(s?.last_name, 100),
-      grade: text(s?.grade, 20),
+      grade: policy.allowed_grades
+        ? primaryGrade(text(s?.grade, 20))
+        : text(s?.grade, 20),
+      gender: text(s?.gender, 10),
       school: text(s?.school, 150),
       document_id: s?.document_id,
     }));
@@ -326,13 +418,58 @@ export async function registrationsApi(
         400,
         "กรอกชื่อ นามสกุล ชั้น โรงเรียน และภาพบัตรของนักเรียนทุกคนให้ครบ",
       );
+    if (
+      policy.allowed_grades &&
+      students.some((s) => !policy.allowed_grades.includes(s.grade))
+    )
+      fail(400, "ระดับชั้นไม่ตรงตามเกณฑ์รายการนี้");
+    if (policy.gender && students.some((s) => s.gender !== policy.gender))
+      fail(400, "ประเภทชาย/หญิงไม่ตรงตามเกณฑ์รายการนี้");
+    if (
+      policy.mixed_gender_pair &&
+      (students.filter((s) => s.gender === "ชาย").length !== 1 ||
+        students.filter((s) => s.gender === "หญิง").length !== 1)
+    )
+      fail(400, "รายการนี้ต้องมีนักเรียนชาย 1 คนและนักเรียนหญิง 1 คน");
+    const coaches = (
+      Array.isArray(b.coaches) ? b.coaches : [{ name: user.name }]
+    ).map((c) => ({ name: text(c?.name, 100) }));
+    const work = text(b.work_url, 2000);
+    if (
+      !coaches.length ||
+      coaches.some((c) => c.name.length < 2 || c.name.length > 100) ||
+      (rules.coach_limits?.min && coaches.length < rules.coach_limits.min) ||
+      (rules.coach_limits?.max && coaches.length > rules.coach_limits.max)
+    )
+      fail(400, "จำนวนหรือรายชื่อครูผู้ฝึกซ้อมไม่ตรงตามเกณฑ์");
+    if (
+      work.length > 2000 ||
+      (work &&
+        (() => {
+          try {
+            const u = new URL(work);
+            return u.protocol !== "https:" || u.username || u.password;
+          } catch {
+            return true;
+          }
+        })())
+    )
+      fail(400, "ลิงก์ผลงานต้องเป็น HTTPS ที่ถูกต้อง");
+    if (policy.work_required && !work)
+      fail(400, "รายการนี้ต้องแนบลิงก์ผลงาน HTTPS");
     if (new Set(students.map((s) => s.document_id)).size !== students.length)
       fail(400, "นักเรียนแต่ละคนต้องมีภาพบัตรของตนเอง");
     const requestId = existing?.request_id || b.request_id;
     if (!uuid(requestId))
       fail(400, "คำขอลงทะเบียนไม่ถูกต้อง กรุณาเปิดฟอร์มใหม่");
     const payloadHash = await digest(
-      JSON.stringify({ competition_id: competitionId, students }),
+      JSON.stringify({
+        competition_id: competitionId,
+        students,
+        variant,
+        coaches,
+        work_url: work,
+      }),
     );
     if (!editing) {
       const duplicate = await db
@@ -347,15 +484,14 @@ export async function registrationsApi(
         return json({ registration: await details(db, duplicate.id) }, 200);
       }
     }
-    for (const student of students) {
-      const doc = await db
-        .prepare(
-          "SELECT 1 FROM registration_documents d WHERE d.id=? AND d.owner_id=? AND NOT EXISTS(SELECT 1 FROM event_students s WHERE s.document_id=d.id AND s.registration_id<>?)",
-        )
-        .bind(student.document_id, user.id, existing?.id || "")
-        .first();
-      if (!doc) fail(400, "ภาพบัตรต้องเป็นของบัญชีนี้และไม่ถูกใช้ในทีมอื่น");
-    }
+    const validDocuments = await db
+      .prepare(
+        "SELECT COUNT(*) AS total FROM json_each(?) j JOIN registration_documents d ON d.id=json_extract(j.value,'$.document_id') WHERE d.owner_id=? AND NOT EXISTS(SELECT 1 FROM event_students s WHERE s.document_id=d.id AND s.registration_id<>?)",
+      )
+      .bind(JSON.stringify(students), user.id, existing?.id || "")
+      .first();
+    if (validDocuments.total !== students.length)
+      fail(400, "ภาพบัตรต้องเป็นของบัญชีนี้และไม่ถูกใช้ในทีมอื่น");
     const id = existing?.id || crypto.randomUUID(),
       writeToken = crypto.randomUUID(),
       t = now();
@@ -372,10 +508,13 @@ export async function registrationsApi(
     const statement = editing
       ? db
           .prepare(
-            "UPDATE event_registrations SET payload_hash=?,status='pending',revision=revision+1,write_token=?,review_note='',reviewed_by=NULL,reviewed_at=NULL,updated_at=? WHERE id=? AND owner_id=? AND revision=? AND status<>'approved' AND EXISTS(SELECT 1 FROM event_competitions WHERE id=event_registrations.competition_id AND registration_open=1 AND min_students=? AND max_students=?)",
+            "UPDATE event_registrations SET payload_hash=?,work_url=?,coaches_json=?,variant=?,status='pending',revision=revision+1,write_token=?,review_note='',reviewed_by=NULL,reviewed_at=NULL,updated_at=? WHERE id=? AND owner_id=? AND revision=? AND status<>'approved' AND EXISTS(SELECT 1 FROM event_competitions WHERE id=event_registrations.competition_id AND registration_open=1 AND COALESCE(roster_min_students,min_students)=? AND (CASE WHEN roster_min_students IS NULL THEN max_students ELSE roster_max_students END) IS ?)",
           )
           .bind(
             payloadHash,
+            work,
+            JSON.stringify(coaches),
+            variant,
             writeToken,
             t,
             id,
@@ -386,7 +525,7 @@ export async function registrationsApi(
           )
       : db
           .prepare(
-            "INSERT INTO event_registrations(id,competition_id,owner_id,request_id,payload_hash,write_token,created_at,updated_at) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM event_competitions WHERE id=? AND registration_open=1 AND min_students=? AND max_students=?)",
+            "INSERT INTO event_registrations(id,competition_id,owner_id,request_id,payload_hash,write_token,created_at,updated_at,work_url,coaches_json,variant) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM event_competitions WHERE id=? AND registration_open=1 AND COALESCE(roster_min_students,min_students)=? AND (CASE WHEN roster_min_students IS NULL THEN max_students ELSE roster_max_students END) IS ?)",
           )
           .bind(
             id,
@@ -397,6 +536,9 @@ export async function registrationsApi(
             writeToken,
             t,
             t,
+            work,
+            JSON.stringify(coaches),
+            variant,
             competitionId,
             competition.min_students,
             competition.max_students,
@@ -409,23 +551,17 @@ export async function registrationsApi(
             "DELETE FROM event_students WHERE registration_id=? AND EXISTS(SELECT 1 FROM event_registrations WHERE id=? AND write_token=?)",
           )
           .bind(id, id, writeToken),
-        ...students.map((s, i) =>
-          db
-            .prepare(
-              "INSERT INTO event_students VALUES(?,(SELECT id FROM event_registrations WHERE id=? AND write_token=?),?,?,?,?,?,?)",
-            )
-            .bind(
-              crypto.randomUUID(),
-              id,
-              writeToken,
-              i,
-              s.first_name,
-              s.last_name,
-              s.grade,
-              s.school,
-              s.document_id,
+        db
+          .prepare(
+            "INSERT INTO event_students(id,registration_id,position,first_name,last_name,grade,school,document_id,gender) SELECT json_extract(j.value,'$.id'),(SELECT id FROM event_registrations WHERE id=? AND write_token=?),CAST(j.key AS INTEGER),json_extract(j.value,'$.first_name'),json_extract(j.value,'$.last_name'),json_extract(j.value,'$.grade'),json_extract(j.value,'$.school'),json_extract(j.value,'$.document_id'),json_extract(j.value,'$.gender') FROM json_each(?) j",
+          )
+          .bind(
+            id,
+            writeToken,
+            JSON.stringify(
+              students.map((s) => ({ ...s, id: crypto.randomUUID() })),
             ),
-        ),
+          ),
         db
           .prepare(
             "DELETE FROM registration_documents WHERE owner_id=? AND id IN (SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM event_students WHERE document_id=registration_documents.id)",

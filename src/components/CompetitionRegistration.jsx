@@ -1,3 +1,4 @@
+import CompetitionRules, { studentCount } from "./CompetitionRules";
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 const statuses = {
@@ -123,17 +124,34 @@ function StudentPhoto({ student, index, disabled, onChange, onUploading }) {
   );
 }
 function RegistrationForm({ competition, user, existing, onDone, onCancel }) {
+  const rules = competition.rules || {},
+    policy = rules.policy || {};
+  const [variant, setVariant] = useState(
+    existing?.variant || policy.team_variants?.[0]?.key || "",
+  );
+  const selectedVariant = policy.team_variants?.find((v) => v.key === variant);
+  const minStudents = selectedVariant?.min_students ?? competition.min_students;
+  const maxStudents = selectedVariant?.max_students ?? competition.max_students;
+  const [coaches, setCoaches] = useState(
+    existing?.coaches?.length
+      ? existing.coaches
+      : Array.from({ length: rules.coach_limits?.min || 1 }, (_, i) => ({
+          name: i === 0 ? user.name : "",
+        })),
+  );
+  const [workUrl, setWorkUrl] = useState(existing?.work_url || "");
   const blank = () => ({
     key: crypto.randomUUID(),
     first_name: "",
     last_name: "",
     grade: "",
+    gender: "",
     school: user.school,
     document_id: "",
   });
   const [students, setStudents] = useState(
     existing?.students.map((s) => ({ ...s, key: s.id })) ||
-      Array.from({ length: competition.min_students }, blank),
+      Array.from({ length: minStudents }, blank),
   );
   const [busy, setBusy] = useState(false),
     [uploading, setUploading] = useState(0),
@@ -166,6 +184,9 @@ function RegistrationForm({ competition, user, existing, onDone, onCancel }) {
         competition_id: competition.id,
         request_id: requestId.current,
         revision: existing?.revision,
+        coaches,
+        work_url: workUrl,
+        variant,
         students: students.map(({ key, id, position, ...student }) => student),
       });
       saved.current = true;
@@ -185,7 +206,7 @@ function RegistrationForm({ competition, user, existing, onDone, onCancel }) {
       <h3>{competition.title}</h3>
       <p>
         {competition.grade_label || "ตรวจระดับชั้นตามเกณฑ์รายการ"} · นักเรียน{" "}
-        {competition.min_students}–{competition.max_students} คน
+        {studentCount(competition)}
       </p>
       <p className="muted">
         ผู้ฝึกซ้อม: {user.name} · {user.school}
@@ -195,8 +216,43 @@ function RegistrationForm({ competition, user, existing, onDone, onCancel }) {
           ข้อเสนอแนะจากผู้จัด: {existing.review_note}
         </div>
       )}
+      <CompetitionRules competition={competition} />
       <form onSubmit={submit}>
         <fieldset disabled={blocked}>
+          {policy.team_variants && (
+            <label className="field">
+              ชุดการแสดง
+              <select
+                required
+                value={variant}
+                onChange={(e) => {
+                  const next = policy.team_variants.find(
+                    (v) => v.key === e.target.value,
+                  );
+                  setVariant(next.key);
+                  if (
+                    students.every(
+                      (s) => !s.first_name && !s.last_name && !s.document_id,
+                    )
+                  )
+                    setStudents(
+                      Array.from({ length: next.min_students }, blank),
+                    );
+                }}
+              >
+                {policy.team_variants.map((v) => (
+                  <option key={v.key} value={v.key}>
+                    {v.label}
+                  </option>
+                ))}
+              </select>
+              <small>
+                ชุดที่เลือกต้องมีนักเรียน {minStudents}–{maxStudents} คน
+                หากกรอกข้อมูลแล้ว ให้ปรับรายชื่อให้ครบตามชุด
+              </small>
+            </label>
+          )}
+
           {students.map((student, i) => (
             <section className="student-card" key={student.key}>
               <div className="section-heading">
@@ -204,7 +260,7 @@ function RegistrationForm({ competition, user, existing, onDone, onCancel }) {
                 <button
                   className="secondary"
                   type="button"
-                  disabled={students.length <= competition.min_students}
+                  disabled={students.length <= minStudents}
                   onClick={() => {
                     if (uploaded.current.has(student.document_id)) {
                       discard(student.document_id);
@@ -241,16 +297,50 @@ function RegistrationForm({ competition, user, existing, onDone, onCancel }) {
                 </label>
                 <label className="field">
                   ชั้น นักเรียนคนที่ {i + 1}
-                  <input
-                    value={student.grade}
-                    required
-                    maxLength={20}
-                    placeholder="เช่น ป.4"
-                    onChange={(e) =>
-                      update(student.key, "grade", e.target.value)
-                    }
-                  />
+                  {policy.allowed_grades ? (
+                    <select
+                      required
+                      value={student.grade}
+                      onChange={(e) =>
+                        update(student.key, "grade", e.target.value)
+                      }
+                    >
+                      <option value="">เลือกชั้น</option>
+                      {policy.allowed_grades.map((g) => (
+                        <option key={g}>{g}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      value={student.grade}
+                      required
+                      maxLength={20}
+                      placeholder="เช่น ป.4"
+                      onChange={(e) =>
+                        update(student.key, "grade", e.target.value)
+                      }
+                    />
+                  )}
                 </label>
+                {(policy.gender || policy.mixed_gender_pair) && (
+                  <label className="field">
+                    ประเภทชาย/หญิง นักเรียนคนที่ {i + 1}
+                    <select
+                      required
+                      value={student.gender || ""}
+                      onChange={(e) =>
+                        update(student.key, "gender", e.target.value)
+                      }
+                    >
+                      <option value="">เลือกประเภท</option>
+                      {(policy.gender ? [policy.gender] : ["ชาย", "หญิง"]).map(
+                        (g) => (
+                          <option key={g}>{g}</option>
+                        ),
+                      )}
+                    </select>
+                  </label>
+                )}
                 <label className="field">
                   โรงเรียน นักเรียนคนที่ {i + 1}
                   <input
@@ -286,15 +376,77 @@ function RegistrationForm({ competition, user, existing, onDone, onCancel }) {
             <button
               className="secondary"
               type="button"
-              disabled={students.length >= competition.max_students}
+              disabled={maxStudents != null && students.length >= maxStudents}
               onClick={() => setStudents([...students, blank()])}
             >
               ＋ เพิ่มนักเรียน
             </button>
             <span className="muted">
-              {students.length} / {competition.max_students} คน
+              {students.length} คน
+              {maxStudents != null
+                ? " / " + maxStudents + " คน"
+                : " (ต้นฉบับไม่ระบุสูงสุด)"}
             </span>
           </div>
+          {competition.catalog_key && (
+            <section className="student-card">
+              <h3>ครูผู้ฝึกซ้อม / ที่ปรึกษา</h3>
+              {coaches.map((c, i) => (
+                <div className="coach-row" key={i}>
+                  <label className="field">
+                    ชื่อ–นามสกุลครูคนที่ {i + 1}
+                    <input
+                      required
+                      minLength={2}
+                      maxLength={100}
+                      value={c.name}
+                      onChange={(e) =>
+                        setCoaches((previous) =>
+                          previous.map((x, j) =>
+                            j === i ? { name: e.target.value } : x,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={coaches.length <= (rules.coach_limits?.min || 1)}
+                    onClick={() =>
+                      setCoaches(coaches.filter((_, j) => j !== i))
+                    }
+                  >
+                    ลบครูคนที่ {i + 1}
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="secondary"
+                disabled={
+                  Boolean(rules.coach_limits?.max) &&
+                  coaches.length >= rules.coach_limits.max
+                }
+                onClick={() => setCoaches([...coaches, { name: "" }])}
+              >
+                ＋ เพิ่มครู
+              </button>
+            </section>
+          )}
+          {(policy.work_required || workUrl) && (
+            <label className="field">
+              ลิงก์ผลงาน HTTPS
+              <input
+                type="url"
+                required={Boolean(policy.work_required)}
+                maxLength={2000}
+                value={workUrl}
+                placeholder="https://…"
+                onChange={(e) => setWorkUrl(e.target.value)}
+              />
+            </label>
+          )}
           <div className="notice">
             ส่งข้อมูลแล้วจะมีสถานะ “รอตรวจเอกสาร” ผู้จัดหรือ superadmin
             จะตรวจสอบก่อนยืนยันการลงทะเบียน การแก้ไขข้อมูลจะส่งเข้าคิวตรวจใหม่
@@ -385,6 +537,22 @@ function RegistrationCard({ row, review, user, onEdit, onReviewed }) {
       </div>
       {expanded && (
         <div className="registration-details">
+          <CompetitionRules
+            competition={{
+              id: row.competition_id,
+              rules: row.competition_rules,
+            }}
+          />
+          {row.coaches?.length > 0 && (
+            <p>ครูผู้ฝึกซ้อม: {row.coaches.map((c) => c.name).join(", ")}</p>
+          )}
+          {row.work_url && (
+            <p>
+              <a href={row.work_url} target="_blank" rel="noreferrer">
+                เปิดลิงก์ผลงาน
+              </a>
+            </p>
+          )}
           {row.students.map((s, i) => (
             <section className="student-card" key={s.id}>
               <h4>
@@ -392,6 +560,7 @@ function RegistrationCard({ row, review, user, onEdit, onReviewed }) {
               </h4>
               <p>
                 ชั้น {s.grade} · {s.school}
+                {s.gender ? " · " + s.gender : ""}
               </p>
               <a
                 className="identity-preview"
@@ -504,7 +673,7 @@ function ManageCompetitions({ competitions, onChanged }) {
                   name="min_students"
                   type="number"
                   min={1}
-                  max={20}
+                  max={1000}
                   defaultValue={1}
                   required
                 />
@@ -515,7 +684,7 @@ function ManageCompetitions({ competitions, onChanged }) {
                   name="max_students"
                   type="number"
                   min={1}
-                  max={20}
+                  max={1000}
                   defaultValue={1}
                   required
                 />
@@ -592,6 +761,23 @@ export default function CompetitionRegistration({ user }) {
     [error, setError] = useState(""),
     [success, setSuccess] = useState(""),
     [form, setForm] = useState(null);
+  const [search, setSearch] = useState(""),
+    [category, setCategory] = useState(""),
+    [division, setDivision] = useState(""),
+    [gradeFilter, setGradeFilter] = useState(""),
+    [catalogPage, setCatalogPage] = useState(1);
+  const filtered = competitions.filter(
+    (c) =>
+      (!search ||
+        (c.title + " " + c.category + " " + (c.rules?.policy?.disability || ""))
+          .toLowerCase()
+          .includes(search.trim().toLowerCase())) &&
+      (!category || c.category === category) &&
+      (!division || (c.rules?.policy?.division || "general") === division) &&
+      (!gradeFilter ||
+        !c.rules?.policy?.allowed_grades ||
+        c.rules.policy.allowed_grades.includes(gradeFilter)),
+  );
   const refresh = () => setVersion((n) => n + 1);
   useEffect(() => {
     let active = true;
@@ -691,6 +877,71 @@ export default function CompetitionRegistration({ user }) {
           <div className="section-heading">
             <h2>รายการแข่งขันศิลปหัตถกรรม</h2>
           </div>
+          <div className="catalog-filters">
+            <label className="field">
+              ค้นหารายการแข่งขัน
+              <input
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setCatalogPage(1);
+                }}
+                placeholder="ชื่อรายการ / ประเภทความพิการ"
+              />
+            </label>
+            <label className="field">
+              หมวดกิจกรรม
+              <select
+                value={category}
+                onChange={(e) => {
+                  setCategory(e.target.value);
+                  setCatalogPage(1);
+                }}
+              >
+                <option value="">ทุกหมวด</option>
+                {[
+                  ...new Set(
+                    competitions.map((c) => c.category).filter(Boolean),
+                  ),
+                ].map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              ประเภท
+              <select
+                value={division}
+                onChange={(e) => {
+                  setDivision(e.target.value);
+                  setCatalogPage(1);
+                }}
+              >
+                <option value="">ทั้งหมด</option>
+                <option value="general">ทั่วไป</option>
+                <option value="inclusive">เรียนรวม</option>
+              </select>
+            </label>
+            <label className="field">
+              ชั้นเรียน
+              <select
+                value={gradeFilter}
+                onChange={(e) => {
+                  setGradeFilter(e.target.value);
+                  setCatalogPage(1);
+                }}
+              >
+                <option value="">ทุกชั้น</option>
+                {[1, 2, 3, 4, 5, 6].map((n) => (
+                  <option key={n}>{"ป." + n}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <p className="muted">
+            พบ {filtered.length} รายการ · แสดงครั้งละ 24 รายการ ·
+            เกณฑ์จากเอกสารปีการศึกษา 2568
+          </p>
           {!competitions.length ? (
             <section className="panel">
               <h3>ยังไม่มีรายการแข่งขัน</h3>
@@ -702,47 +953,84 @@ export default function CompetitionRegistration({ user }) {
             </section>
           ) : (
             <div className="competition-list">
-              {competitions.map((c) => (
-                <article className="panel" key={c.id}>
-                  <span
-                    className={
-                      "badge " + (c.registration_open ? "status-approved" : "")
-                    }
-                  >
-                    {c.registration_open ? "เปิดรับสมัคร" : "ปิดรับสมัคร"}
-                  </span>
-                  <h3>{c.title}</h3>
-                  <p>
-                    {c.grade_label || "ดูเกณฑ์รายการ"} · นักเรียน{" "}
-                    {c.min_students}–{c.max_students} คน
-                  </p>
-                  <p className="preserve-lines">
-                    {c.description || "ผู้จัดยังไม่ได้ระบุรายละเอียดเพิ่มเติม"}
-                  </p>
-                  <p className="muted">
-                    แข่งขัน: {date(c.starts_at)}
-                    <br />
-                    สถานที่: {c.venue || "รอประกาศ"}
-                  </p>
-                  {coach ? (
-                    <button
-                      className="primary"
-                      disabled={!c.registration_open}
-                      onClick={() => {
-                        setSuccess("");
-                        setForm({ competition: c });
-                      }}
+              {filtered
+                .slice((catalogPage - 1) * 24, catalogPage * 24)
+                .map((c) => (
+                  <article className="panel" key={c.id}>
+                    <span
+                      className={
+                        "badge " +
+                        (c.registration_open ? "status-approved" : "")
+                      }
                     >
-                      ลงทะเบียนนักเรียน
-                    </button>
-                  ) : (
-                    <p className="muted">
-                      ผู้ฝึกซ้อมเป็นผู้ลงทะเบียนให้นักเรียน
+                      {c.registration_open ? "เปิดรับสมัคร" : "ปิดรับสมัคร"}
+                    </span>
+                    <h3>{c.title}</h3>
+                    <p>
+                      {c.grade_label || "ดูเกณฑ์รายการ"} · นักเรียน{" "}
+                      {studentCount(c)}
                     </p>
-                  )}
-                </article>
-              ))}
+                    {c.category && (
+                      <span className="badge">
+                        {c.category}
+                        {c.rules?.policy?.division === "inclusive"
+                          ? " · เรียนรวม"
+                          : ""}
+                      </span>
+                    )}
+                    <CompetitionRules competition={c} />
+                    <p className="preserve-lines">
+                      {c.description ||
+                        "ผู้จัดยังไม่ได้ระบุรายละเอียดเพิ่มเติม"}
+                    </p>
+                    <p className="muted">
+                      แข่งขัน: {date(c.starts_at)}
+                      <br />
+                      สถานที่: {c.venue || "รอประกาศ"}
+                    </p>
+                    {coach ? (
+                      <button
+                        className="primary"
+                        disabled={!c.registration_open}
+                        onClick={() => {
+                          setSuccess("");
+                          setForm({ competition: c });
+                        }}
+                      >
+                        ลงทะเบียนนักเรียน
+                      </button>
+                    ) : (
+                      <p className="muted">
+                        ผู้ฝึกซ้อมเป็นผู้ลงทะเบียนให้นักเรียน
+                      </p>
+                    )}
+                  </article>
+                ))}
             </div>
+          )}
+          {!loading && filtered.length > 24 && (
+            <div className="form-actions">
+              <button
+                className="secondary"
+                disabled={catalogPage === 1}
+                onClick={() => setCatalogPage((n) => n - 1)}
+              >
+                รายการก่อนหน้า
+              </button>
+              <span>
+                หน้า {catalogPage} / {Math.ceil(filtered.length / 24)}
+              </span>
+              <button
+                className="secondary"
+                disabled={catalogPage * 24 >= filtered.length}
+                onClick={() => setCatalogPage((n) => n + 1)}
+              >
+                รายการถัดไป
+              </button>
+            </div>
+          )}
+          {competitions.length > 0 && filtered.length === 0 && (
+            <p>ไม่พบรายการตามตัวกรองที่เลือก</p>
           )}
         </>
       ) : tab === "manage" ? (

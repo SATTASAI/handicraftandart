@@ -234,6 +234,7 @@ async function api(r, env) {
   }
   if (
     path === "/api/competitions" ||
+    path.startsWith("/api/competitions/") ||
     path.startsWith("/api/registrations") ||
     path.startsWith("/api/registration-documents") ||
     path.startsWith("/api/admin/competitions") ||
@@ -262,9 +263,29 @@ export default {
   async fetch(r, env) {
     let response;
     try {
-      response = new URL(r.url).pathname.startsWith("/api/")
-        ? await api(r, env)
-        : await env.ASSETS.fetch(r);
+      let decodedPath = new URL(r.url).pathname;
+      try {
+        for (let i = 0; i < 3; i++) {
+          const next = decodeURIComponent(decodedPath);
+          if (next === decodedPath) break;
+          decodedPath = next;
+        }
+      } catch {
+        fail(400, "เส้นทางไม่ถูกต้อง");
+      }
+      const ruleDocument = /\.pdf\/?$/i.test(decodedPath);
+      if (ruleDocument) {
+        if (!env.DB || !(await currentUser(r, env.DB)))
+          fail(401, "กรุณาเข้าสู่ระบบเพื่ออ่านเอกสารเกณฑ์");
+        const asset = await env.ASSETS.fetch(r);
+        const headers = new Headers(asset.headers);
+        headers.set("Cache-Control", "private, no-store");
+        headers.set("X-Robots-Tag", "noindex, noarchive");
+        response = new Response(asset.body, { status: asset.status, headers });
+      } else
+        response = new URL(r.url).pathname.startsWith("/api/")
+          ? await api(r, env)
+          : await env.ASSETS.fetch(r);
     } catch (error) {
       response = json(
         {

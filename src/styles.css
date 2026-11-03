@@ -754,3 +754,75 @@ textarea {
   justify-content: flex-end;
   margin: -10px 0 20px;
 }
+.catalog-filters {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr 1fr 1fr;
+  gap: 14px;
+  margin-top: 20px;
+}
+.competition-rules {
+  margin: 15px 0;
+  padding: 12px;
+  background: #f4f8ff;
+  border: 1px solid #dce6f4;
+  border-radius: 9px;
+  font-size: 12px;
+}
+.competition-rules summary {
+  cursor: pointer;
+  color: #1557cc;
+  font-weight: bold;
+}
+.competition-rules p {
+  margin: 12px 0;
+}
+.competition-rules table td,
+.competition-rules table th {
+  white-space: normal;
+  min-width: 75px;
+  padding: 9px;
+}
+.rules-text {
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 420px;
+  overflow: auto;
+}
+.coach-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+.coach-row .field {
+  flex: 1;
+  margin: 0;
+}
+@media (max-width: 700px) {
+  .catalog-filters {
+    grid-template-columns: 1fr 1fr;
+  }
+  .catalog-filters .field:first-child {
+    grid-column: 1/-1;
+  }
+  .coach-row {
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 700px) {
+  .page-heading {
+    flex-wrap: wrap;
+  }
+  .page-heading > div {
+    flex: 1 0 100%;
+  }
+  .page-heading > a,
+  .page-heading > button {
+    flex: 1 0 auto;
+    text-align: center;
+    white-space: nowrap;
+  }
+}

@@ -11,6 +11,7 @@ async function runtime(t) {
         { type: "ESModule", path: "server/index.js" },
         { type: "ESModule", path: "server/security.js" },
         { type: "ESModule", path: "server/registrations.js" },
+        { type: "ESModule", path: "server/catalog.js" },
       ],
       compatibilityDate: "2026-11-02",
       d1Databases: ["DB"],

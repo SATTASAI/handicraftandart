@@ -10,6 +10,7 @@ export function devApi() {
             { type: "ESModule", path: "server/index.js" },
             { type: "ESModule", path: "server/security.js" },
             { type: "ESModule", path: "server/registrations.js" },
+            { type: "ESModule", path: "server/catalog.js" },
           ],
           compatibilityDate: "2026-11-02",
           d1Databases: ["DB"],
@@ -44,7 +45,45 @@ export function devApi() {
           ),
         );
       }
+      if (
+        !(await db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='competition_rule_sources'",
+          )
+          .first())
+      ) {
+        await db.exec(
+          await readFile("migrations/0013_primary_criteria_73.sql", "utf8"),
+        );
+      }
       server.middlewares.use(async (req, res, next) => {
+        let documentPath = (req.url || "").split("?")[0];
+        try {
+          for (let i = 0; i < 3; i++) {
+            const next = decodeURIComponent(documentPath);
+            if (next === documentPath) break;
+            documentPath = next;
+          }
+        } catch {
+          res.writeHead(400);
+          res.end();
+          return;
+        }
+        if (/\.pdf\/?$/i.test(documentPath)) {
+          const session = await mf.dispatchFetch(
+            "http://" + req.headers.host + "/api/me",
+            { headers: { Cookie: req.headers.cookie || "" } },
+          );
+          const { user } = await session.json();
+          res.setHeader("Cache-Control", "private, no-store");
+          if (!user) {
+            res.writeHead(401, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({ error: "กรุณาเข้าสู่ระบบเพื่ออ่านเอกสารเกณฑ์" }),
+            );
+            return;
+          }
+        }
         if (!req.url?.startsWith("/api/")) return next();
         try {
           const chunks = [];
@@ -55,7 +94,7 @@ export function devApi() {
               size >
               (req.url.split("?")[0] === "/api/registration-documents"
                 ? 1048576
-                : 65536)
+                : 262144)
             ) {
               res.writeHead(413, { "Content-Type": "application/json" });
               res.end(JSON.stringify({ error: "ข้อมูลมีขนาดใหญ่เกินกำหนด" }));

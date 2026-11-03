@@ -11,7 +11,12 @@ const png = Buffer.from(
 async function runtime(t, beforeUpgrade) {
   const mf = new Miniflare(
     convertV4MiniflareOptions({
-      modules: ["index.js", "security.js", "registrations.js"].map((f) => ({
+      modules: [
+        "index.js",
+        "security.js",
+        "registrations.js",
+        "catalog.js",
+      ].map((f) => ({
         type: "ESModule",
         path: "server/" + f,
       })),
