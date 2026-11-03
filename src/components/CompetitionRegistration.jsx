@@ -1,6 +1,12 @@
 import CompetitionRules, { studentCount } from "./CompetitionRules";
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import {
+  CertificatesPanel,
+  JudgeAssignment,
+  JudgePanel,
+  ResultsPanel,
+} from "./Judging";
 const statuses = {
   pending: "รอตรวจเอกสาร",
   approved: "ยืนยันการลงทะเบียนแล้ว",
@@ -815,6 +821,12 @@ export default function CompetitionRegistration({ user }) {
     ...(coach ? [["mine", "รายการสมัครของฉัน"]] : []),
     ...(reviewer ? [["review", "ตรวจเอกสาร / ยืนยัน"]] : []),
     ...(user.is_superadmin ? [["manage", "จัดการรายการแข่งขัน"]] : []),
+    ...(user.is_superadmin ? [["judges", "มอบหมายกรรมการ"]] : []),
+    ...(user.is_superadmin || user.roles.includes("judge")
+      ? [["judging", "สำหรับกรรมการ"]]
+      : []),
+    ["results", "ผลการแข่งขัน"],
+    ...(coach ? [["certificates", "ประกาศนียบัตร"]] : []),
   ];
   return (
     <section className="competition-workspace" aria-label="ลงทะเบียนแข่งขัน">
@@ -855,7 +867,19 @@ export default function CompetitionRegistration({ user }) {
           </button>
         </div>
       )}
-      {form ? (
+      {tab === "judging" ? (
+        <JudgePanel key={version} />
+      ) : tab === "results" ? (
+        <ResultsPanel key={version} reviewer={reviewer} />
+      ) : tab === "certificates" ? (
+        <CertificatesPanel key={version} user={user} />
+      ) : tab === "judges" ? (
+        loading ? (
+          <p role="status">กำลังโหลด…</p>
+        ) : (
+          <JudgeAssignment competitions={competitions} />
+        )
+      ) : form ? (
         <RegistrationForm
           key={form.existing?.id || form.competition.id}
           user={user}

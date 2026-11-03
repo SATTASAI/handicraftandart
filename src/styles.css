@@ -826,3 +826,51 @@ textarea {
     white-space: nowrap;
   }
 }
+
+/* Judging, results, certificates */
+.judge-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.judge-item:hover,
+.judge-item:focus-visible {
+  border-color: #2563eb;
+}
+.score-card h3 {
+  margin: 0;
+}
+.score-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+.score-grid input {
+  max-width: 9rem;
+}
+.medal-gold {
+  background: #fdf3d0;
+  color: #7a5a00;
+}
+.medal-silver {
+  background: #eceff3;
+  color: #3f4652;
+}
+.medal-bronze {
+  background: #f6e1d3;
+  color: #7a3b16;
+}
+.medal-none {
+  background: #e8f0fb;
+  color: #1e4a8a;
+}
+details.panel summary {
+  cursor: pointer;
+  font-weight: 600;
+}

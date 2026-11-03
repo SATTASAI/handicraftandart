@@ -1,0 +1,4 @@
+CREATE TABLE event_judges (competition_id TEXT NOT NULL REFERENCES event_competitions(id),judge_id TEXT NOT NULL REFERENCES account_users(id),assigned_by TEXT NOT NULL REFERENCES account_users(id),created_at INTEGER NOT NULL,PRIMARY KEY(competition_id,judge_id));
+CREATE INDEX event_judges_judge ON event_judges(judge_id);
+CREATE TABLE event_scores (registration_id TEXT NOT NULL REFERENCES event_registrations(id),judge_id TEXT NOT NULL REFERENCES account_users(id),revision INTEGER NOT NULL,scores_json TEXT NOT NULL CHECK(json_valid(scores_json)),total REAL NOT NULL CHECK(total>=0),updated_at INTEGER NOT NULL,PRIMARY KEY(registration_id,judge_id));
+CREATE TABLE app_settings (key TEXT PRIMARY KEY,value TEXT NOT NULL CHECK(json_valid(value)),updated_by TEXT REFERENCES account_users(id),updated_at INTEGER NOT NULL);
