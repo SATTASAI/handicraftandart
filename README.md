@@ -23,7 +23,7 @@ npx wrangler deploy --dry-run --outdir .wrangler/deploy-check
 
 ## ฐานข้อมูลและ deployment
 
-Worker `handicraftandart` ใช้ binding `DB` เชื่อม D1 เดิม UUID `5f721e5a-f1c7-4b9a-bfea-e9a0c39ea333` migration `0011_restart_accounts.sql` สร้างตาราง `account_users`, `account_bootstrap`, `account_sessions`, `account_limits` สำหรับระบบบัญชีใหม่ บัญชีรุ่นเก่าไม่ถูกนำมาใช้ล็อกอิน และ migration นี้ไม่ล้างตารางการแข่งขันเดิม การ reset ฐานข้อมูลจริงจากคำขอก่อนหน้ายังไม่ได้ดำเนินการ
+Worker `handicraftandart` ใช้ binding `DB` เชื่อม D1 เดิม UUID `ef879189-20c8-43ad-9a60-ea2d12c29544` migration `0011_restart_accounts.sql` สร้างตาราง `account_users`, `account_bootstrap`, `account_sessions`, `account_limits` สำหรับระบบบัญชีใหม่ บัญชีรุ่นเก่าไม่ถูกนำมาใช้ล็อกอิน และ migration นี้ไม่ล้างตารางการแข่งขันเดิม การ reset ฐานข้อมูลจริงจากคำขอก่อนหน้ายังไม่ได้ดำเนินการ
 
 ขั้น deploy ต้องได้รับอนุญาตแยกจากการพัฒนาในเครื่อง สำรอง D1 ก่อนใช้ migration แล้วจึงเผยแพร่ Worker ด้วยสิทธิ์ Cloudflare ของบัญชีเดิม `npm run deploy` ประกอบด้วย build, remote migration และ deploy โดยไม่มี prebuild hook ที่แก้ production อัตโนมัติ การ build และ GitHub checks ไม่แก้ฐานข้อมูลจริง
 

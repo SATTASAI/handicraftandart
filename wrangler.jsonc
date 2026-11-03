@@ -4,6 +4,6 @@
   "main": "server/index.js",
   "compatibility_date": "2026-11-02",
   "assets": { "directory": "./dist", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*"] },
-  "d1_databases": [{ "binding": "DB", "database_name": "handicraftandart", "database_id": "5f721e5a-f1c7-4b9a-bfea-e9a0c39ea333", "migrations_dir": "migrations" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "handicraftandart", "database_id": "ef879189-20c8-43ad-9a60-ea2d12c29544", "migrations_dir": "migrations" }],
   "observability": { "enabled": true }
 }
