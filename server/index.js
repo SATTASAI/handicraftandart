@@ -329,7 +329,8 @@ async function api(r, env, ctx) {
     path.startsWith("/api/registration-documents") ||
     path.startsWith("/api/admin/competitions") ||
     path.startsWith("/api/admin/registrations") ||
-    path === "/api/admin/organizers"
+    path === "/api/admin/organizers" ||
+    path.startsWith("/api/admin/storage")
   ) {
     const user = await currentUser(r, db);
     if (!user) fail(401, "กรุณาเข้าสู่ระบบ");
@@ -342,6 +343,7 @@ async function api(r, env, ctx) {
     path === "/api/results" ||
     path.startsWith("/api/results/") ||
     path === "/api/certificates" ||
+    path.startsWith("/api/certificate-files/") ||
     path === "/api/certificate-settings"
   ) {
     const user = await currentUser(r, db);

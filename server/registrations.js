@@ -1,5 +1,6 @@
 import { activationSql } from "./catalog.js";
 import { now, digest, publicUser } from "./security.js";
+import { driveEnabled, uploadFile, downloadFile, deleteFiles } from "./drive.js";
 const MAX_IMAGE = 1048576;
 function effectiveCounts(row) {
   return row
@@ -136,6 +137,65 @@ export async function registrationsApi(
       ),
     });
   }
+  if (path === "/api/admin/storage" && method === "GET") {
+    if (!superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
+    const counts = await db
+      .prepare(
+        "SELECT SUM(drive_file_id IS NULL) AS in_d1,SUM(drive_file_id IS NOT NULL) AS in_drive,COALESCE(SUM(CASE WHEN drive_file_id IS NULL THEN size END),0) AS d1_bytes FROM registration_documents",
+      )
+      .first();
+    const certs = await db
+      .prepare("SELECT COUNT(*) AS n FROM certificate_files")
+      .first();
+    return json({
+      drive: driveEnabled(env),
+      documents_in_d1: counts?.in_d1 || 0,
+      documents_in_drive: counts?.in_drive || 0,
+      d1_document_bytes: counts?.d1_bytes || 0,
+      certificates_in_drive: certs?.n || 0,
+    });
+  }
+  if (path === "/api/admin/storage/migrate" && method === "POST") {
+    if (!superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
+    if (!driveEnabled(env)) fail(503, "ยังไม่ได้ตั้งค่า Google Drive");
+    // Small batches keep each request well inside Worker subrequest limits.
+    const rows = (
+      await db
+        .prepare(
+          "SELECT id,content_type,data FROM registration_documents WHERE drive_file_id IS NULL ORDER BY created_at,id LIMIT 10",
+        )
+        .all()
+    ).results;
+    let moved = 0;
+    for (const doc of rows) {
+      const bytes = new Uint8Array(doc.data);
+      const driveId = await uploadFile(
+        env,
+        db,
+        "documents",
+        doc.id + (doc.content_type === "image/png" ? ".png" : ".jpg"),
+        doc.content_type,
+        bytes,
+      ).catch((error) => {
+        console.error("document migrate failed", doc.id, error);
+        fail(502, "ย้ายภาพไป Google Drive ไม่สำเร็จ กรุณาลองใหม่");
+      });
+      const result = await db
+        .prepare(
+          "UPDATE registration_documents SET drive_file_id=?,data=X'' WHERE id=? AND drive_file_id IS NULL",
+        )
+        .bind(driveId, doc.id)
+        .run();
+      if (result.meta.changes) moved++;
+      else await deleteFiles(env, [driveId]);
+    }
+    const left = await db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM registration_documents WHERE drive_file_id IS NULL",
+      )
+      .first();
+    return json({ moved, remaining: left.n });
+  }
   if (path === "/api/competitions" && method === "GET") {
     if (
       await db
@@ -245,16 +305,47 @@ export async function registrationsApi(
     await limit(db, r, "document-upload:" + user.id, 120, 3600);
     const { bytes, type } = await imageBytes(r, fail),
       id = crypto.randomUUID();
-    await db
+    const stale = await db
       .prepare(
-        "DELETE FROM registration_documents WHERE owner_id=? AND created_at<? AND NOT EXISTS(SELECT 1 FROM event_students s WHERE s.document_id=registration_documents.id)",
+        "DELETE FROM registration_documents WHERE owner_id=? AND created_at<? AND NOT EXISTS(SELECT 1 FROM event_students s WHERE s.document_id=registration_documents.id) RETURNING drive_file_id",
       )
       .bind(user.id, now() - 86400)
-      .run();
-    await db
-      .prepare("INSERT INTO registration_documents VALUES(?,?,?,?,?,?)")
-      .bind(id, user.id, type, bytes.length, bytes.buffer, now())
-      .run();
+      .all();
+    const drive = driveEnabled(env);
+    if (drive)
+      await deleteFiles(
+        env,
+        stale.results.map((x) => x.drive_file_id),
+      );
+    let driveId = null;
+    if (drive) {
+      try {
+        driveId = await uploadFile(
+          env,
+          db,
+          "documents",
+          id + (type === "image/png" ? ".png" : ".jpg"),
+          type,
+          bytes,
+        );
+      } catch (error) {
+        console.error("document drive upload failed", error);
+        fail(502, "อัปโหลดภาพไปยัง Google Drive ไม่สำเร็จ กรุณาลองใหม่");
+      }
+    }
+    // Drive-stored rows keep an empty blob (X'') instead of the image bytes.
+    await (driveId
+      ? db
+          .prepare(
+            "INSERT INTO registration_documents(id,owner_id,content_type,size,data,created_at,drive_file_id) VALUES(?,?,?,?,X'',?,?)",
+          )
+          .bind(id, user.id, type, bytes.length, now(), driveId)
+      : db
+          .prepare(
+            "INSERT INTO registration_documents(id,owner_id,content_type,size,data,created_at) VALUES(?,?,?,?,?,?)",
+          )
+          .bind(id, user.id, type, bytes.length, bytes.buffer, now())
+    ).run();
     return json({ id, content_type: type, size: bytes.length }, 201);
   }
   const documentMatch = path.match(
@@ -270,8 +361,16 @@ export async function registrationsApi(
       .bind(id, user.id, superadmin ? 1 : 0, reviewer ? 1 : 0)
       .first();
     if (!doc) fail(404, "ไม่พบเอกสารหรือไม่มีสิทธิ์เข้าถึง");
-    if (method === "GET")
-      return new Response(new Uint8Array(doc.data), {
+    if (method === "GET") {
+      let data = new Uint8Array(doc.data);
+      if (doc.drive_file_id)
+        try {
+          data = await downloadFile(env, doc.drive_file_id);
+        } catch (error) {
+          console.error("document drive download failed", error);
+          fail(502, "โหลดภาพจาก Google Drive ไม่สำเร็จ กรุณาลองใหม่");
+        }
+      return new Response(data, {
         headers: {
           "Content-Type": doc.content_type,
           "Cache-Control": "private, no-store",
@@ -283,15 +382,18 @@ export async function registrationsApi(
             '"',
         },
       });
+    }
     if (method === "DELETE") {
       if (doc.owner_id !== user.id) fail(403, "เฉพาะเจ้าของเอกสารเท่านั้น");
       const result = await db
         .prepare(
-          "DELETE FROM registration_documents WHERE id=? AND owner_id=? AND NOT EXISTS(SELECT 1 FROM event_students WHERE document_id=?)",
+          "DELETE FROM registration_documents WHERE id=? AND owner_id=? AND NOT EXISTS(SELECT 1 FROM event_students WHERE document_id=?) RETURNING drive_file_id",
         )
         .bind(id, user.id, id)
-        .run();
-      if (!result.meta.changes) fail(409, "เอกสารถูกใช้ในรายการสมัครแล้ว");
+        .all();
+      if (!result.results.length) fail(409, "เอกสารถูกใช้ในรายการสมัครแล้ว");
+      if (driveEnabled(env))
+        await deleteFiles(env, [result.results[0].drive_file_id]);
       return json({ ok: true });
     }
   }
@@ -574,8 +676,9 @@ export async function registrationsApi(
             competition.min_students,
             competition.max_students,
           );
+    let batch;
     try {
-      await db.batch([
+      batch = await db.batch([
         statement,
         db
           .prepare(
@@ -595,7 +698,7 @@ export async function registrationsApi(
           ),
         db
           .prepare(
-            "DELETE FROM registration_documents WHERE owner_id=? AND id IN (SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM event_students WHERE document_id=registration_documents.id)",
+            "DELETE FROM registration_documents WHERE owner_id=? AND id IN (SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM event_students WHERE document_id=registration_documents.id) RETURNING drive_file_id",
           )
           .bind(user.id, JSON.stringify(oldDocuments)),
       ]);
@@ -617,6 +720,11 @@ export async function registrationsApi(
         );
       throw error;
     }
+    if (driveEnabled(env))
+      await deleteFiles(
+        env,
+        (batch[3]?.results || []).map((x) => x.drive_file_id),
+      );
     return json({ registration: await details(db, id) }, editing ? 200 : 201);
   }
   const reviewMatch = path.match(
