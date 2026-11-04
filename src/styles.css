@@ -1492,3 +1492,15 @@ details.panel summary {
     max-width: none;
   }
 }
+.auth-screen.single {
+  width: min(100%, 520px);
+  grid-template-columns: 1fr;
+}
+.forgot-link {
+  text-align: right;
+  font-size: 14px;
+  margin: -6px 0 12px;
+}
+.forgot-link a {
+  font-weight: 600;
+}

@@ -17,6 +17,7 @@ async function runtime(t, beforeUpgrade) {
         "registrations.js",
         "catalog.js",
         "judging.js",
+        "mail.js",
       ].map((f) => ({
         type: "ESModule",
         path: "server/" + f,
