@@ -71,7 +71,7 @@ export async function computeResults(db, competition) {
   const judges = (
     await db
       .prepare(
-        "SELECT j.judge_id,u.name FROM event_judges j JOIN account_users u ON u.id=j.judge_id WHERE j.competition_id=? ORDER BY u.name",
+        "SELECT j.judge_id,u.name,u.school FROM event_judges j JOIN account_users u ON u.id=j.judge_id WHERE j.competition_id=? ORDER BY u.name",
       )
       .bind(competition.id)
       .all()
@@ -135,7 +135,7 @@ export async function computeResults(db, competition) {
       grade_label: competition.grade_label,
     },
     max_total: maxTotal,
-    judges: judges.map((j) => ({ id: j.judge_id, name: j.name })),
+    judges: judges.map((j) => ({ id: j.judge_id, name: j.name, school: j.school })),
     complete,
     teams: ranked,
   };
@@ -387,28 +387,50 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
     return json({ settings: value });
   }
   if (path === "/api/certificates" && method === "GET") {
+    // Visible after results publish: coach -> own teams (students + coach
+    // certificates); assigned judge -> every team's students in that
+    // competition + own judge certificate; superadmin -> everything.
     const comps = (
       await db
         .prepare(
-          "SELECT DISTINCT c.id,c.title,c.category,c.grade_label,c.rules_json FROM event_competitions c JOIN event_registrations r ON r.competition_id=c.id WHERE r.status='approved' AND (?=1 OR r.owner_id=?) ORDER BY c.category,c.title",
+          "SELECT c.id,c.title,c.category,c.grade_label,c.rules_json FROM event_competitions c WHERE ?=1 OR EXISTS(SELECT 1 FROM event_registrations r WHERE r.competition_id=c.id AND r.status='approved' AND r.owner_id=?) OR EXISTS(SELECT 1 FROM event_judges j WHERE j.competition_id=c.id AND j.judge_id=?) ORDER BY c.category,c.title",
         )
-        .bind(superadmin ? 1 : 0, user.id)
+        .bind(superadmin ? 1 : 0, user.id, user.id)
         .all()
     ).results;
     const certificates = [],
+      judge_certificates = [],
       pending = [];
     for (const c of comps) {
       const res = await computeResults(db, c);
-      const mine = res.teams.filter((t) => superadmin || t.owner_id === user.id);
+      const judging = res.judges.some((j) => j.id === user.id);
+      const mine = res.teams.filter(
+        (t) => superadmin || judging || t.owner_id === user.id,
+      );
+      if (!res.teams.length) continue;
       if (!res.complete) {
         pending.push({ ...res.competition, teams: mine.length });
         continue;
       }
       for (const t of mine)
-        certificates.push({ competition: res.competition, ...strip(t) });
+        certificates.push({
+          competition: res.competition,
+          ...strip(t),
+          own: t.owner_id === user.id,
+          coach_certificate: superadmin || t.owner_id === user.id,
+        });
+      const judgesFor = superadmin
+        ? res.judges
+        : res.judges.filter((j) => j.id === user.id);
+      if (judgesFor.length)
+        judge_certificates.push({
+          competition: res.competition,
+          judges: judgesFor.map((j) => ({ name: j.name, school: j.school })),
+        });
     }
     return json({
       certificates,
+      judge_certificates,
       pending,
       settings: await certificateSettings(db),
     });

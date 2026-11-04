@@ -463,7 +463,7 @@ const sectionList = [
     short: "เกียรติบัตร",
     icon: "award",
     hint: "ดาวน์โหลดเป็น PDF",
-    can: (r) => r.coach,
+    can: (r) => r.coach || r.judge,
   },
   {
     key: "manage",

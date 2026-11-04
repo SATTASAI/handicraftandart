@@ -191,21 +191,47 @@ function awardBadge(ctx, text, y, color) {
   ctx.textBaseline = "alphabetic";
 }
 
-function drawCertificate(ctx, cert, student, settings, img, sigImgs = []) {
+const awardOf = (medal, rank) =>
+  medal === "เข้าร่วม" ? "" : `รางวัล${medal}${rank ? " " + rank : ""}`;
+
+// One page per recipient. kind: "student" | "coach" | "judge".
+function pagesOf(cert, kind) {
+  const accent = medalColors[cert.medal] || NAVY_SOFT;
+  const award = awardOf(cert.medal, cert.rank_label);
+  if (kind === "judge")
+    return cert.judges.map((j) => ({
+      name: j.name,
+      school: j.school,
+      award: "เป็นกรรมการตัดสินการแข่งขัน",
+      accent: NAVY,
+    }));
+  if (kind === "coach") {
+    const coaches = (cert.coaches || []).map((c) => c?.name).filter(Boolean);
+    return (coaches.length ? coaches : [cert.coach_name]).map((name) => ({
+      name,
+      school: cert.school,
+      award: award ? `ครูผู้ฝึกซ้อมนักเรียนได้รับ${award}` : "ครูผู้ฝึกซ้อมนักเรียนเข้าร่วมการแข่งขัน",
+      accent,
+    }));
+  }
+  return cert.students.map((st) => ({
+    name: `${st.first_name} ${st.last_name}`,
+    school: st.school || cert.school,
+    award: award ? `ได้รับ${award}` : "ได้เข้าร่วมการแข่งขัน",
+    accent,
+  }));
+}
+
+function drawCertificate(ctx, cert, page, settings, img, sigImgs = []) {
   frame(ctx);
   logo(ctx, img, 146);
   line(ctx, settings.organization, 248, 30, 600, NAVY, W - 420, 1);
   line(ctx, "ประกาศนียบัตร", 404, 88, 700, NAVY, W - 420, 0, SCRIPT);
   divider(ctx, 448);
   line(ctx, "ขอมอบไว้เพื่อแสดงว่า", 496, 30, 400, NAVY_SOFT);
-  line(ctx, `${student.first_name} ${student.last_name}`, 606, 72, 700, "#121c33", W - 420, 0, SCRIPT);
-  line(ctx, withSchool(student.school || cert.school), 664, 32, 400, NAVY_SOFT);
-  const accent = medalColors[cert.medal] || NAVY_SOFT;
-  const award =
-    cert.medal === "เข้าร่วม"
-      ? "ได้เข้าร่วมการแข่งขัน"
-      : `ได้รับรางวัล${cert.medal}${cert.rank_label ? " " + cert.rank_label : ""}`;
-  awardBadge(ctx, award, 746, accent);
+  line(ctx, page.name, 606, 72, 700, "#121c33", W - 420, 0, SCRIPT);
+  line(ctx, withSchool(page.school), 664, 32, 400, NAVY_SOFT);
+  awardBadge(ctx, page.award, 746, page.accent);
   line(
     ctx,
     `การแข่งขัน${cert.competition.title}${cert.competition.grade_label ? " ระดับชั้น " + cert.competition.grade_label : ""}`,
@@ -311,7 +337,7 @@ function buildPdf(images) {
   return new Blob(parts, { type: "application/pdf" });
 }
 
-export async function downloadCertificates(certs, settings, filename) {
+export async function downloadCertificates(certs, settings, filename, kind = "student") {
   await loadFonts();
   const canvas = document.createElement("canvas");
   canvas.width = W;
@@ -323,11 +349,11 @@ export async function downloadCertificates(certs, settings, filename) {
       (settings.signers || []).filter((s) => s.name || s.position || s.signature).map((s) => loadImage(s.signature)),
     );
   for (const cert of certs)
-    for (const student of cert.students) {
-      drawCertificate(ctx, cert, student, settings, img, sigImgs);
+    for (const page of pagesOf(cert, kind)) {
+      drawCertificate(ctx, cert, page, settings, img, sigImgs);
       pages.push(await jpeg(canvas));
     }
-  if (!pages.length) throw Error("ไม่มีรายชื่อนักเรียนสำหรับสร้างประกาศนียบัตร");
+  if (!pages.length) throw Error("ไม่มีรายชื่อสำหรับสร้างประกาศนียบัตร");
   const url = URL.createObjectURL(buildPdf(pages));
   const a = document.createElement("a");
   a.href = url;
@@ -337,3 +363,5 @@ export async function downloadCertificates(certs, settings, filename) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
+
+export const certificateCount = (cert, kind) => pagesOf(cert, kind).length;
