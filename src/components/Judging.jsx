@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
-import { processSignature } from "./signatureImage.js";
+import { processLogo, processSignature } from "./signatureImage.js";
 import { downloadCertificates } from "./certificatePdf";
 
 function useLoad(path, deps) {
@@ -420,17 +420,20 @@ function CertificateSettings({ settings, onSaved }) {
           <input value={s.issued_text} maxLength={100} onChange={(e) => set("issued_text", e.target.value)} />
         </label>
         <div className="field">
-          โลโก้ (PNG/JPEG ไม่เกิน 200 KB)
+          โลโก้ (PNG/JPEG ไม่เกิน 5 MB ระบบจะย่อให้อัตโนมัติ)
           <input
             type="file"
             accept="image/png,image/jpeg"
-            onChange={(e) => {
+            onChange={async (e) => {
               const f = e.target.files?.[0];
+              e.target.value = "";
               if (!f) return;
-              if (f.size > 200 * 1024) return setMsg("ไฟล์โลโก้ใหญ่เกิน 200 KB");
-              const rd = new FileReader();
-              rd.onload = () => set("logo", rd.result);
-              rd.readAsDataURL(f);
+              try {
+                set("logo", await processLogo(f));
+                setMsg("");
+              } catch (err) {
+                setMsg(err.message);
+              }
             }}
           />
           {s.logo && (
@@ -459,7 +462,7 @@ function CertificateSettings({ settings, onSaved }) {
               />
             </label>
             <div className="field">
-              ลายเซ็นอิเล็กทรอนิกส์ (ถ่ายรูปลายเซ็นบนกระดาษขาว ระบบจะลบพื้นหลังให้)
+              ลายเซ็นอิเล็กทรอนิกส์ (ถ่ายรูปลายเซ็นบนกระดาษขาว ไม่เกิน 5 MB ระบบจะลบพื้นหลังให้)
               <input
                 type="file"
                 accept="image/*"

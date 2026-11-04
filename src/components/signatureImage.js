@@ -74,8 +74,41 @@ function otsu(values) {
   return t;
 }
 
-export async function processSignature(file) {
+export const MAX_UPLOAD = 5 * 1024 * 1024;
+
+function checkFile(file) {
   if (file.type && !file.type.startsWith("image/")) throw Error("กรุณาเลือกไฟล์รูปภาพ");
+  if (file.size > MAX_UPLOAD) throw Error("ไฟล์ใหญ่เกิน 5 MB");
+}
+
+// โลโก้: รับไฟล์ไม่เกิน 5 MB แล้วย่อเหลือด้านยาวไม่เกิน 512px ก่อนบันทึก
+export async function processLogo(file) {
+  checkFile(file);
+  const img = await readImage(file);
+  const k = Math.min(1, 512 / Math.max(img.width, img.height));
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(img.width * k));
+  c.height = Math.max(1, Math.round(img.height * k));
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  let url = c.toDataURL("image/png");
+  if (url.length > 280000) {
+    const j = document.createElement("canvas");
+    j.width = c.width;
+    j.height = c.height;
+    const jc = j.getContext("2d");
+    jc.fillStyle = "#ffffff";
+    jc.fillRect(0, 0, j.width, j.height);
+    jc.drawImage(c, 0, 0);
+    url = j.toDataURL("image/jpeg", 0.9);
+  }
+  if (url.length > 280000) throw Error("ย่อโลโก้ไม่ลง กรุณาใช้ไฟล์ที่เรียบง่ายกว่านี้");
+  return url;
+}
+
+export async function processSignature(file) {
+  checkFile(file);
   const img = await readImage(file);
   const k = Math.min(1, WORK_MAX / Math.max(img.width, img.height));
   const w = Math.max(1, Math.round(img.width * k)),

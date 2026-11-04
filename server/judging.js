@@ -199,7 +199,7 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
     const b = await body(r, 1000000);
     const logo = typeof b.logo === "string" ? b.logo : "";
     if (logo && (logo.length > 300000 || !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(logo)))
-      fail(400, "โลโก้ต้องเป็นไฟล์ PNG/JPEG ขนาดไม่เกิน 200 KB");
+      fail(400, "ไฟล์โลโก้ไม่ถูกต้องหรือใหญ่เกินไป");
     const c = await competition(b.competition_id);
     if (!uuid(b.judge_id) || typeof b.assigned !== "boolean")
       fail(400, "ข้อมูลไม่ถูกต้อง");
@@ -361,7 +361,7 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
     const b = await body(r, 1000000);
     const logo = typeof b.logo === "string" ? b.logo : "";
     if (logo && (logo.length > 300000 || !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(logo)))
-      fail(400, "โลโก้ต้องเป็นไฟล์ PNG/JPEG ขนาดไม่เกิน 200 KB");
+      fail(400, "ไฟล์โลโก้ไม่ถูกต้องหรือใหญ่เกินไป");
     const s = (v, m) => (typeof v === "string" ? v.trim().slice(0, m) : "");
     const signers = Array.isArray(b.signers) ? b.signers.slice(0, 3) : [];
     const value = {
