@@ -1,0 +1,13 @@
+DELETE FROM certificate_files WHERE competition_id IN (SELECT id FROM event_competitions WHERE source_key='inclusive-a81dd12e1515');
+DELETE FROM event_scores WHERE registration_id IN (SELECT r.id FROM event_registrations r JOIN event_competitions c ON c.id=r.competition_id WHERE c.source_key='inclusive-a81dd12e1515');
+DELETE FROM event_registration_reviews WHERE registration_id IN (SELECT r.id FROM event_registrations r JOIN event_competitions c ON c.id=r.competition_id WHERE c.source_key='inclusive-a81dd12e1515');
+CREATE TABLE migration_0017_inclusive_docs AS SELECT s.document_id AS id FROM event_students s JOIN event_registrations r ON r.id=s.registration_id JOIN event_competitions c ON c.id=r.competition_id WHERE c.source_key='inclusive-a81dd12e1515';
+DELETE FROM event_students WHERE registration_id IN (SELECT r.id FROM event_registrations r JOIN event_competitions c ON c.id=r.competition_id WHERE c.source_key='inclusive-a81dd12e1515');
+DELETE FROM registration_documents WHERE id IN (SELECT id FROM migration_0017_inclusive_docs);
+DROP TABLE migration_0017_inclusive_docs;
+DELETE FROM event_registrations WHERE competition_id IN (SELECT id FROM event_competitions WHERE source_key='inclusive-a81dd12e1515');
+DELETE FROM event_judges WHERE competition_id IN (SELECT id FROM event_competitions WHERE source_key='inclusive-a81dd12e1515');
+DELETE FROM event_competitions WHERE source_key='inclusive-a81dd12e1515';
+DELETE FROM competition_catalog WHERE source_key='inclusive-a81dd12e1515';
+DELETE FROM competition_rule_sections WHERE source_key='inclusive-a81dd12e1515';
+DELETE FROM competition_rule_sources WHERE key='inclusive-a81dd12e1515';

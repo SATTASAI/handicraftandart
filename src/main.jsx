@@ -581,7 +581,8 @@ function UsersPanel() {
   const [users, setUsers] = useState([]),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
-    [organizerBusy, setOrganizerBusy] = useState(false);
+    [organizerBusy, setOrganizerBusy] = useState(false),
+    [notice, setNotice] = useState("");
   async function setOrganizer(id, enabled) {
     const previousUser = users.find((u) => u.id === id);
     setUsers((previous) =>
@@ -607,6 +608,43 @@ function UsersPanel() {
       setUsers((previous) =>
         previous.map((u) => (u.id === id ? previousUser : u)),
       );
+      setError(e.message);
+    } finally {
+      setOrganizerBusy(false);
+    }
+  }
+  async function deleteUser(u) {
+    if (
+      !window.confirm(
+        "ลบบัญชี " +
+          u.name +
+          " ถาวร?\nทีมที่บัญชีนี้สมัคร เอกสาร และคะแนนที่บัญชีนี้ให้จะถูกลบด้วย",
+      )
+    )
+      return;
+    setOrganizerBusy(true);
+    setError("");
+    try {
+      await api("/admin/users/" + u.id + "/delete", {});
+      setUsers((previous) => previous.filter((x) => x.id !== u.id));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setOrganizerBusy(false);
+    }
+  }
+  async function resetData() {
+    const typed = window.prompt(
+      "ล้างข้อมูลการแข่งขันทั้งหมด: ทีมที่สมัคร เอกสาร คะแนน และผลตัดสินจะถูกลบถาวร (บัญชีผู้ใช้และรายการแข่งขันยังอยู่)\nพิมพ์คำว่า ล้างข้อมูล เพื่อยืนยัน",
+    );
+    if (typed === null) return;
+    setOrganizerBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await api("/admin/reset-competition-data", { confirm: typed.trim() });
+      setNotice("ล้างข้อมูลการแข่งขันแล้ว");
+    } catch (e) {
       setError(e.message);
     } finally {
       setOrganizerBusy(false);
@@ -658,21 +696,48 @@ function UsersPanel() {
               {u.is_superadmin ? (
                 <span className="badge super">ทุกสิทธิ์</span>
               ) : (
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(u.is_organizer)}
+                <>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(u.is_organizer)}
+                      disabled={organizerBusy}
+                      onChange={(e) => setOrganizer(u.id, e.target.checked)}
+                      aria-label={"ให้สิทธิ์ผู้จัดตรวจเอกสารแก่ " + u.name}
+                    />
+                    <span aria-hidden="true">ผู้จัด</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="danger-button"
                     disabled={organizerBusy}
-                    onChange={(e) => setOrganizer(u.id, e.target.checked)}
-                    aria-label={"ให้สิทธิ์ผู้จัดตรวจเอกสารแก่ " + u.name}
-                  />
-                  <span aria-hidden="true">ผู้จัด</span>
-                </label>
+                    onClick={() => deleteUser(u)}
+                    aria-label={"ลบบัญชี " + u.name}
+                  >
+                    ลบบัญชี
+                  </button>
+                </>
               )}
             </li>
           ))}
         </ul>
       )}
+      <div className="section-heading">
+        <h2>ล้างข้อมูล</h2>
+      </div>
+      <p className="muted">
+        ลบทีมที่สมัคร เอกสาร คะแนน และผลตัดสินทั้งหมด
+        บัญชีผู้ใช้และรายการแข่งขันยังคงอยู่
+      </p>
+      {notice && <p role="status">{notice}</p>}
+      <button
+        type="button"
+        className="danger-button"
+        disabled={organizerBusy}
+        onClick={resetData}
+      >
+        ล้างข้อมูลการแข่งขัน
+      </button>
     </section>
   );
 }

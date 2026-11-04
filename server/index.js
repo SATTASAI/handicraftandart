@@ -1,5 +1,6 @@
 import { registrationsApi } from "./registrations.js";
 import { judgingApi } from "./judging.js";
+import { driveEnabled, deleteFiles } from "./drive.js";
 import { sendEmail, passwordResetEmail } from "./mail.js";
 import {
   now,
@@ -361,6 +362,78 @@ async function api(r, env, ctx) {
           .all()
       ).results.map(publicUser),
     });
+  }
+  if (path === "/api/admin/reset-competition-data" && r.method === "POST") {
+    const user = await currentUser(r, db);
+    if (!user) fail(401, "กรุณาเข้าสู่ระบบ");
+    if (!user.is_superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
+    const b = await body(r);
+    if (b.confirm !== "ล้างข้อมูล") fail(400, "กรุณาพิมพ์คำยืนยันให้ถูกต้อง");
+    const driveIds = (
+      await db
+        .prepare(
+          "SELECT drive_file_id AS id FROM registration_documents WHERE drive_file_id IS NOT NULL UNION ALL SELECT drive_file_id FROM certificate_files",
+        )
+        .all()
+    ).results.map((x) => x.id);
+    await db.batch(
+      [
+        "DELETE FROM certificate_files",
+        "DELETE FROM event_scores",
+        "DELETE FROM event_registration_reviews",
+        "DELETE FROM event_students",
+        "DELETE FROM event_registrations",
+        "DELETE FROM registration_documents",
+      ].map((sql) => db.prepare(sql)),
+    );
+    if (driveEnabled(env)) await deleteFiles(env, driveIds);
+    return json({ ok: true });
+  }
+  const deleteUser = path.match(/^\/api\/admin\/users\/([a-f0-9-]{36})\/delete$/i);
+  if (deleteUser && r.method === "POST") {
+    const user = await currentUser(r, db);
+    if (!user) fail(401, "กรุณาเข้าสู่ระบบ");
+    if (!user.is_superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
+    const id = deleteUser[1].toLowerCase();
+    if (id === user.id) fail(400, "ไม่สามารถลบบัญชีของตนเองได้");
+    const target = await db
+      .prepare("SELECT id,is_superadmin FROM account_users WHERE id=?")
+      .bind(id)
+      .first();
+    if (!target) fail(404, "ไม่พบบัญชี");
+    if (target.is_superadmin) fail(400, "ไม่สามารถลบบัญชี superadmin ได้");
+    const own = "SELECT id FROM event_registrations WHERE owner_id=?1";
+    const driveIds = (
+      await db
+        .prepare(
+          "SELECT drive_file_id AS id FROM registration_documents WHERE owner_id=? AND drive_file_id IS NOT NULL",
+        )
+        .bind(id)
+        .all()
+    ).results.map((x) => x.id);
+    await db.batch(
+      [
+        `DELETE FROM event_scores WHERE judge_id=?1 OR registration_id IN (${own})`,
+        `DELETE FROM event_registration_reviews WHERE registration_id IN (${own})`,
+        "UPDATE event_registration_reviews SET reviewer_id=?2 WHERE reviewer_id=?1",
+        `DELETE FROM event_students WHERE registration_id IN (${own})`,
+        "DELETE FROM event_registrations WHERE owner_id=?1",
+        "UPDATE event_registrations SET reviewed_by=?2 WHERE reviewed_by=?1",
+        "DELETE FROM registration_documents WHERE owner_id=?1",
+        "DELETE FROM event_judges WHERE judge_id=?1",
+        "UPDATE event_judges SET assigned_by=?2 WHERE assigned_by=?1",
+        "UPDATE event_competitions SET created_by=?2 WHERE created_by=?1",
+        "UPDATE app_settings SET updated_by=NULL WHERE updated_by=?1",
+        "UPDATE certificate_files SET created_by=NULL WHERE created_by=?1",
+        "DELETE FROM account_sessions WHERE user_id=?1",
+        "DELETE FROM account_password_resets WHERE user_id=?1",
+        "DELETE FROM account_users WHERE id=?1 AND is_superadmin=0",
+      ].map((sql) =>
+        db.prepare(sql).bind(...(sql.includes("?2") ? [id, user.id] : [id])),
+      ),
+    );
+    if (driveEnabled(env)) await deleteFiles(env, driveIds);
+    return json({ ok: true });
   }
   fail(404, "ไม่พบรายการที่ร้องขอ");
 }
