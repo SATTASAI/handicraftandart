@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { processLogo, processSignature } from "./signatureImage.js";
-import { downloadCertificates } from "./certificatePdf";
+import { coachesOf, downloadCertificates } from "./certificatePdf";
 
 function useLoad(path, deps) {
   const [state, setState] = useState({ loading: true, error: "", data: null });
@@ -508,11 +508,11 @@ export function CertificatesPanel({ user }) {
   const q = useLoad("/certificates", []);
   const [busy, setBusy] = useState(""),
     [error, setError] = useState("");
-  async function download(certs, name) {
+  async function download(certs, name, kind = "student") {
     setBusy(name);
     setError("");
     try {
-      await downloadCertificates(certs, q.data.settings, name + ".pdf");
+      await downloadCertificates(certs, q.data.settings, name + ".pdf", kind);
     } catch (e) {
       setError(e.message || "สร้าง PDF ไม่สำเร็จ");
     } finally {
@@ -524,9 +524,14 @@ export function CertificatesPanel({ user }) {
       <div className="section-heading">
         <h2>ประกาศนียบัตร</h2>
         {q.data?.certificates.length > 1 && (
-          <button className="secondary" disabled={!!busy} onClick={() => download(q.data.certificates, "ประกาศนียบัตรทั้งหมด")}>
-            ดาวน์โหลดทั้งหมด (PDF)
-          </button>
+          <div className="form-actions">
+            <button className="secondary" disabled={!!busy} onClick={() => download(q.data.certificates, "ประกาศนียบัตรนักเรียนทั้งหมด")}>
+              นักเรียนทั้งหมด (PDF)
+            </button>
+            <button className="secondary" disabled={!!busy} onClick={() => download(q.data.certificates, "ประกาศนียบัตรครูผู้ฝึกซ้อมทั้งหมด", "coach")}>
+              ครูผู้ฝึกซ้อมทั้งหมด (PDF)
+            </button>
+          </div>
         )}
       </div>
       <Status {...q} />
@@ -557,13 +562,23 @@ export function CertificatesPanel({ user }) {
               <p>
                 {names(c.students)} <span className="muted">· คะแนน {c.score}</span>
               </p>
-              <button
-                className="primary"
-                disabled={!!busy}
-                onClick={() => download([c], "ประกาศนียบัตร-" + c.competition.title)}
-              >
-                {busy === "ประกาศนียบัตร-" + c.competition.title ? "กำลังสร้าง PDF…" : `ดาวน์โหลด PDF (${c.students.length} ใบ)`}
-              </button>
+              <p className="muted">ครูผู้ฝึกซ้อม: {coachesOf(c).map((x) => x.name).join(", ") || "-"}</p>
+              <div className="form-actions">
+                <button
+                  className="primary"
+                  disabled={!!busy}
+                  onClick={() => download([c], "ประกาศนียบัตรนักเรียน-" + c.competition.title)}
+                >
+                  {busy === "ประกาศนียบัตรนักเรียน-" + c.competition.title ? "กำลังสร้าง PDF…" : `นักเรียน (${c.students.length} ใบ)`}
+                </button>
+                <button
+                  className="secondary"
+                  disabled={!!busy || !coachesOf(c).length}
+                  onClick={() => download([c], "ประกาศนียบัตรครู-" + c.competition.title, "coach")}
+                >
+                  {busy === "ประกาศนียบัตรครู-" + c.competition.title ? "กำลังสร้าง PDF…" : `ครูผู้ฝึกซ้อม (${coachesOf(c).length} ใบ)`}
+                </button>
+              </div>
             </section>
           ))}
           {q.data.pending.length > 0 && (

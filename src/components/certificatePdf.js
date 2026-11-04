@@ -23,16 +23,22 @@ function loadFonts() {
 }
 const W = 1754,
   H = 1240; // A4 landscape, 150 dpi
-const NAVY = "#1b2d52",
-  NAVY_SOFT = "#3d4f73",
-  GOLD = "#b8933a",
-  GOLD_SOFT = "#e6d6ad",
-  PAPER = "#fdfbf6";
+// ธีมสี: นักเรียน = กรมท่า+ทอง, ครูผู้ฝึกซ้อม = เขียวเข้ม+ทอง (กรอบทองเด่น)
+const THEMES = {
+  student: { main: "#1b2d52", soft: "#3d4f73", ink: "#121c33", gold: "#b8933a", goldSoft: "#e6d6ad", paper: "#fdfbf6", coach: false },
+  coach: { main: "#1f4d3a", soft: "#3f6b57", ink: "#13301f", gold: "#b08a2e", goldSoft: "#ead9a8", paper: "#fdfaf1", coach: true },
+};
+let T = THEMES.student;
+let NAVY, NAVY_SOFT, GOLD, GOLD_SOFT, PAPER;
+function useTheme(name) {
+  T = THEMES[name];
+  ({ main: NAVY, soft: NAVY_SOFT, gold: GOLD, goldSoft: GOLD_SOFT, paper: PAPER } = T);
+}
+useTheme("student");
 const medalColors = {
   เหรียญทอง: "#a8801f",
   เหรียญเงิน: "#6f7884",
   เหรียญทองแดง: "#9a5a34",
-  เข้าร่วม: NAVY_SOFT,
 };
 
 const withSchool = (s) =>
@@ -128,20 +134,36 @@ function frame(ctx) {
   ctx.lineWidth = 2;
   for (let r = 90; r <= 450; r += 60) diamond(ctx, W / 2, H / 2 + 40, r, null, NAVY);
   ctx.restore();
-  // แถบกรมท่าด้านนอก + เส้นทองด้านใน
-  ctx.strokeStyle = NAVY;
-  ctx.lineWidth = 10;
-  ctx.strokeRect(36, 36, W - 72, H - 72);
-  ctx.strokeStyle = GOLD;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(58, 58, W - 116, H - 116);
+  if (T.coach) {
+    // กรอบทองเด่น: แถบทองหนา + เส้นเขียว + เส้นทองบางด้านใน
+    ctx.strokeStyle = GOLD;
+    ctx.lineWidth = 16;
+    ctx.strokeRect(34, 34, W - 68, H - 68);
+    ctx.strokeStyle = GOLD_SOFT;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(34, 34, W - 68, H - 68);
+    ctx.strokeStyle = NAVY;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(52, 52, W - 104, H - 104);
+    ctx.strokeStyle = GOLD;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(62, 62, W - 124, H - 124);
+  } else {
+    // แถบกรมท่าด้านนอก + เส้นทองด้านใน
+    ctx.strokeStyle = NAVY;
+    ctx.lineWidth = 10;
+    ctx.strokeRect(36, 36, W - 72, H - 72);
+    ctx.strokeStyle = GOLD;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(58, 58, W - 116, H - 116);
+  }
   const m = 82;
   corner(ctx, m, m, 1, 1);
   corner(ctx, W - m, m, -1, 1);
   corner(ctx, m, H - m, 1, -1);
   corner(ctx, W - m, H - m, -1, -1);
   // ขีดกลางขอบบน-ล่าง
-  [58, H - 58].forEach((y) => {
+  [T.coach ? 52 : 58, T.coach ? H - 52 : H - 58].forEach((y) => {
     diamond(ctx, W / 2, y, 9, PAPER, GOLD);
     diamond(ctx, W / 2, y, 3.5, NAVY);
   });
@@ -197,19 +219,19 @@ function drawCertificate(ctx, cert, student, settings, img, sigImgs = []) {
   line(ctx, settings.organization, 248, 30, 600, NAVY, W - 420, 1);
   line(ctx, "ประกาศนียบัตร", 404, 88, 700, NAVY, W - 420, 0, SCRIPT);
   divider(ctx, 448);
-  line(ctx, "ขอมอบไว้เพื่อแสดงว่า", 496, 30, 400, NAVY_SOFT);
-  line(ctx, `${student.first_name} ${student.last_name}`, 606, 72, 700, "#121c33", W - 420, 0, SCRIPT);
-  line(ctx, withSchool(student.school || cert.school), 664, 32, 400, NAVY_SOFT);
+  line(ctx, "ขอมอบไว้เพื่อแสดงว่า", 488, 30, 400, NAVY_SOFT);
+  line(ctx, `${student.first_name} ${student.last_name}`, 612, 66, 700, T.ink, W - 420, 0, SCRIPT);
+  line(ctx, withSchool(student.school || cert.school), 678, 32, 400, NAVY_SOFT);
   const accent = medalColors[cert.medal] || NAVY_SOFT;
   const award =
     cert.medal === "เข้าร่วม"
       ? "ได้เข้าร่วมการแข่งขัน"
       : `ได้รับรางวัล${cert.medal}${cert.rank_label ? " " + cert.rank_label : ""}`;
-  awardBadge(ctx, award, 746, accent);
+  awardBadge(ctx, award, 756, accent);
   line(
     ctx,
     `การแข่งขัน${cert.competition.title}${cert.competition.grade_label ? " ระดับชั้น " + cert.competition.grade_label : ""}`,
-    834,
+    840,
     34,
     600,
     NAVY,
@@ -217,6 +239,10 @@ function drawCertificate(ctx, cert, student, settings, img, sigImgs = []) {
   line(ctx, settings.event_line, 884, 30, 400, NAVY_SOFT);
   if (settings.issued_text) line(ctx, settings.issued_text, 930, 28, 400, NAVY_SOFT);
 
+  signatures(ctx, settings, sigImgs);
+}
+
+function signatures(ctx, settings, sigImgs) {
   const signers = (settings.signers || []).filter((s) => s.name || s.position || s.signature);
   const slot = (W - 420) / Math.max(signers.length, 1);
   signers.forEach((s, i) => {
@@ -244,6 +270,45 @@ function drawCertificate(ctx, cert, student, settings, img, sigImgs = []) {
     ctx.font = `400 24px ${FONT}`;
     if (s.position) ctx.fillText(s.position, x, 1120);
   });
+}
+
+function drawCoachCertificate(ctx, cert, coach, settings, img, sigImgs = []) {
+  frame(ctx);
+  logo(ctx, img, 146);
+  line(ctx, settings.organization, 248, 30, 600, NAVY, W - 420, 1);
+  line(ctx, "ประกาศนียบัตร", 404, 88, 700, NAVY, W - 420, 0, SCRIPT);
+  divider(ctx, 448);
+  line(ctx, "ขอมอบไว้เพื่อแสดงว่า", 488, 30, 400, NAVY_SOFT);
+  line(ctx, coach.name, 610, 64, 700, T.ink, W - 420, 0, SCRIPT);
+  line(ctx, withSchool(coach.school), 674, 30, 400, NAVY_SOFT);
+  const joined = cert.medal === "เข้าร่วม";
+  line(
+    ctx,
+    joined ? "เป็นครูผู้ฝึกซ้อมนักเรียนที่" : "เป็นครูผู้ฝึกซ้อมนักเรียนที่ได้รับ",
+    724,
+    30,
+    600,
+    GOLD,
+    W - 420,
+    1,
+  );
+  awardBadge(
+    ctx,
+    joined ? "เข้าร่วมการแข่งขัน" : `รางวัล${cert.medal}${cert.rank_label ? " " + cert.rank_label : ""}`,
+    782,
+    medalColors[cert.medal] || NAVY,
+  );
+  line(
+    ctx,
+    `การแข่งขัน${cert.competition.title}${cert.competition.grade_label ? " ระดับชั้น " + cert.competition.grade_label : ""}`,
+    856,
+    32,
+    600,
+    NAVY,
+  );
+  line(ctx, settings.event_line, 898, 28, 400, NAVY_SOFT);
+  if (settings.issued_text) line(ctx, settings.issued_text, 936, 26, 400, NAVY_SOFT);
+  signatures(ctx, settings, sigImgs);
 }
 
 function loadImage(src) {
@@ -311,7 +376,13 @@ function buildPdf(images) {
   return new Blob(parts, { type: "application/pdf" });
 }
 
-export async function downloadCertificates(certs, settings, filename) {
+// ครูผู้ฝึกซ้อม 1 ใบต่อครู 1 คนต่อ 1 ทีม (จากรายชื่อที่กรอกตอนสมัคร)
+export const coachesOf = (cert) =>
+  (cert.coaches?.length ? cert.coaches : cert.coach_name ? [{ name: cert.coach_name }] : [])
+    .map((c) => ({ name: (c?.name || "").trim(), school: cert.coach_school || cert.school || "" }))
+    .filter((c) => c.name);
+
+export async function downloadCertificates(certs, settings, filename, kind = "student") {
   await loadFonts();
   const canvas = document.createElement("canvas");
   canvas.width = W;
@@ -322,12 +393,24 @@ export async function downloadCertificates(certs, settings, filename) {
     sigImgs = await Promise.all(
       (settings.signers || []).filter((s) => s.name || s.position || s.signature).map((s) => loadImage(s.signature)),
     );
-  for (const cert of certs)
-    for (const student of cert.students) {
-      drawCertificate(ctx, cert, student, settings, img, sigImgs);
-      pages.push(await jpeg(canvas));
-    }
-  if (!pages.length) throw Error("ไม่มีรายชื่อนักเรียนสำหรับสร้างประกาศนียบัตร");
+  useTheme(kind === "coach" ? "coach" : "student");
+  try {
+    for (const cert of certs)
+      if (kind === "coach")
+        for (const coach of coachesOf(cert)) {
+          drawCoachCertificate(ctx, cert, coach, settings, img, sigImgs);
+          pages.push(await jpeg(canvas));
+        }
+      else
+        for (const student of cert.students) {
+          drawCertificate(ctx, cert, student, settings, img, sigImgs);
+          pages.push(await jpeg(canvas));
+        }
+  } finally {
+    useTheme("student");
+  }
+  if (!pages.length)
+    throw Error(kind === "coach" ? "ไม่มีรายชื่อครูผู้ฝึกซ้อมสำหรับสร้างประกาศนียบัตร" : "ไม่มีรายชื่อนักเรียนสำหรับสร้างประกาศนียบัตร");
   const url = URL.createObjectURL(buildPdf(pages));
   const a = document.createElement("a");
   a.href = url;
