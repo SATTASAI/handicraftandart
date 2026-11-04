@@ -512,7 +512,7 @@ export function CertificatesPanel({ user }) {
     setBusy(name);
     setError("");
     try {
-      await downloadCertificates(certs, q.data.settings, name + ".pdf", kind);
+      await downloadCertificates(certs, q.data.settings, name + ".pdf", kind, Boolean(q.data.drive));
     } catch (e) {
       setError(e.message || "สร้าง PDF ไม่สำเร็จ");
     } finally {

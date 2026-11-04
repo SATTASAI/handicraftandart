@@ -518,6 +518,65 @@ function rolesOf(user) {
     reviewer: Boolean(user.is_superadmin || user.is_organizer),
   };
 }
+// Superadmin: where ID images / certificates are stored, and moving old
+// ID images out of D1 into Google Drive in small batches.
+function StoragePanel() {
+  const [info, setInfo] = useState(null),
+    [msg, setMsg] = useState(""),
+    [busy, setBusy] = useState(false);
+  const load = () =>
+    api("/admin/storage")
+      .then(setInfo)
+      .catch((e) => setMsg(e.message));
+  useEffect(() => {
+    load();
+  }, []);
+  async function migrate() {
+    setBusy(true);
+    setMsg("");
+    try {
+      let total = 0;
+      for (let round = 0; round < 500; round++) {
+        const r = await api("/admin/storage/migrate", {});
+        total += r.moved;
+        setMsg(`ย้ายแล้ว ${total} ภาพ เหลือ ${r.remaining} ภาพ`);
+        if (!r.remaining || !r.moved) break;
+      }
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setBusy(false);
+      load();
+    }
+  }
+  return (
+    <section className="panel">
+      <h2>ที่เก็บไฟล์ (Google Drive)</h2>
+      {!info ? (
+        <p className="muted">{msg || "กำลังโหลด…"}</p>
+      ) : (
+        <>
+          <p>
+            {info.drive
+              ? "เชื่อมต่อ Google Drive แล้ว ภาพบัตรใหม่และประกาศนียบัตรจะเก็บใน Drive"
+              : "ยังไม่ได้ตั้งค่า Google Drive ภาพบัตรใหม่ยังเก็บในฐานข้อมูล D1"}
+          </p>
+          <p className="muted">
+            ภาพบัตรใน Drive {info.documents_in_drive} · ใน D1 {info.documents_in_d1} (
+            {(info.d1_document_bytes / 1048576).toFixed(1)} MB) · ประกาศนียบัตรใน Drive{" "}
+            {info.certificates_in_drive} ไฟล์
+          </p>
+          {info.drive && info.documents_in_d1 > 0 && (
+            <button className="primary" disabled={busy} onClick={migrate}>
+              {busy ? "กำลังย้าย…" : "ย้ายภาพบัตรจาก D1 ไป Drive"}
+            </button>
+          )}
+          {msg && <p role="status">{msg}</p>}
+        </>
+      )}
+    </section>
+  );
+}
 function UsersPanel() {
   const [users, setUsers] = useState([]),
     [error, setError] = useState(""),
@@ -899,7 +958,10 @@ function Shell({ user, onLogout, busy }) {
           ) : current.key === "account" ? (
             <Account user={user} onLogout={onLogout} busy={busy} />
           ) : current.key === "users" ? (
-            <UsersPanel />
+            <>
+              <UsersPanel />
+              <StoragePanel />
+            </>
           ) : workspaceTabs.has(current.key) ? (
             <CompetitionRegistration
               user={user}

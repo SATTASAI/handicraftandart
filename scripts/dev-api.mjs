@@ -12,6 +12,8 @@ export function devApi() {
             { type: "ESModule", path: "server/registrations.js" },
             { type: "ESModule", path: "server/catalog.js" },
             { type: "ESModule", path: "server/mail.js" },
+            { type: "ESModule", path: "server/judging.js" },
+            { type: "ESModule", path: "server/drive.js" },
           ],
           compatibilityDate: "2026-11-02",
           d1Databases: ["DB"],
@@ -57,6 +59,14 @@ export function devApi() {
           await readFile("migrations/0013_primary_criteria_73.sql", "utf8"),
         );
       }
+      // Later additive migrations, each guarded by an object it creates.
+      for (const [file, check] of [
+        ["0014_judging_results.sql", "SELECT 1 FROM sqlite_master WHERE name='event_scores'"],
+        ["0015_password_resets.sql", "SELECT 1 FROM sqlite_master WHERE name='account_password_resets'"],
+        ["0016_drive_storage.sql", "SELECT 1 FROM sqlite_master WHERE name='certificate_files'"],
+      ])
+        if (!(await db.prepare(check).first()))
+          await db.exec(await readFile("migrations/" + file, "utf8"));
       server.middlewares.use(async (req, res, next) => {
         let documentPath = (req.url || "").split("?")[0];
         try {

@@ -1,4 +1,10 @@
-import { now } from "./security.js";
+import { now, digest } from "./security.js";
+import { driveEnabled, uploadFile, downloadFile, deleteFiles } from "./drive.js";
+
+// Bump when src/components/certificatePdf.js drawing changes so PDFs saved in
+// Google Drive are regenerated instead of served with the old design.
+export const CERTIFICATE_DESIGN = "2026-11-04";
+const MAX_CERTIFICATE_PDF = 40 * 1048576;
 
 export const MEDALS = [
   { min: 80, label: "เหรียญทอง" },
@@ -386,6 +392,16 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
       .run();
     return json({ settings: value });
   }
+  // Each downloadable certificate file is a "unit": student pages or coach
+  // pages of one team, or one judge's page. Its fingerprint changes whenever
+  // anything printed on it (scores, names, settings, design) changes.
+  const settings = await certificateSettings(db);
+  const settingsKey = await digest(JSON.stringify(settings));
+  const fingerprint = (key, payload) =>
+    digest(JSON.stringify([CERTIFICATE_DESIGN, settingsKey, key, payload]));
+  const teamPayload = (res, t) => ({ competition: res.competition, ...strip(t) });
+  const judgePayload = (res, j) => ({ competition: res.competition, judge: j });
+
   if (path === "/api/certificates" && method === "GET") {
     // Visible after results publish: coach -> own teams (students + coach
     // certificates); assigned judge -> every team's students in that
@@ -398,6 +414,17 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
         .bind(superadmin ? 1 : 0, user.id, user.id)
         .all()
     ).results;
+    const stored = new Map(
+      (
+        await db
+          .prepare("SELECT unit_key,fingerprint FROM certificate_files")
+          .all()
+      ).results.map((x) => [x.unit_key, x.fingerprint]),
+    );
+    const file = async (key, payload) => {
+      const f = await fingerprint(key, payload);
+      return { key, fingerprint: f, stored: stored.get(key) === f };
+    };
     const certificates = [],
       judge_certificates = [],
       pending = [];
@@ -412,28 +439,144 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
         pending.push({ ...res.competition, teams: mine.length });
         continue;
       }
-      for (const t of mine)
+      for (const t of mine) {
+        const coachCert = superadmin || t.owner_id === user.id;
         certificates.push({
           competition: res.competition,
           ...strip(t),
           own: t.owner_id === user.id,
-          coach_certificate: superadmin || t.owner_id === user.id,
+          coach_certificate: coachCert,
+          files: {
+            student: await file("student." + t.registration_id, teamPayload(res, t)),
+            ...(coachCert
+              ? { coach: await file("coach." + t.registration_id, teamPayload(res, t)) }
+              : {}),
+          },
         });
+      }
       const judgesFor = superadmin
         ? res.judges
         : res.judges.filter((j) => j.id === user.id);
-      if (judgesFor.length)
-        judge_certificates.push({
-          competition: res.competition,
-          judges: judgesFor.map((j) => ({ name: j.name, school: j.school })),
-        });
+      if (judgesFor.length) {
+        const judges = [];
+        for (const j of judgesFor)
+          judges.push({
+            id: j.id,
+            name: j.name,
+            school: j.school,
+            file: await file("judge." + c.id + "." + j.id, judgePayload(res, j)),
+          });
+        judge_certificates.push({ competition: res.competition, judges });
+      }
     }
     return json({
       certificates,
       judge_certificates,
       pending,
-      settings: await certificateSettings(db),
+      drive: driveEnabled(env),
+      settings,
     });
+  }
+
+  const fileMatch = path.match(
+    /^\/api\/certificate-files\/(?:(student|coach)\.([a-f0-9-]{36})|judge\.([a-zA-Z0-9-]{1,80})\.([a-f0-9-]{36}))$/i,
+  );
+  if (fileMatch && (method === "GET" || method === "POST")) {
+    const key = path.slice("/api/certificate-files/".length);
+    let competitionId = fileMatch[3];
+    if (!competitionId) {
+      const reg = await db
+        .prepare("SELECT competition_id FROM event_registrations WHERE id=?")
+        .bind(fileMatch[2])
+        .first();
+      if (!reg) fail(404, "ไม่พบประกาศนียบัตร");
+      competitionId = reg.competition_id;
+    }
+    const c = await competition(competitionId);
+    const res = await computeResults(db, c);
+    if (!res.complete) fail(404, "ยังไม่ประกาศผลรายการนี้");
+    const judging = res.judges.some((j) => j.id === user.id);
+    let payload = null;
+    if (fileMatch[1]) {
+      const t = res.teams.find((x) => x.registration_id === fileMatch[2]);
+      const allowed =
+        t &&
+        (superadmin ||
+          t.owner_id === user.id ||
+          (fileMatch[1].toLowerCase() === "student" && judging));
+      if (allowed) payload = teamPayload(res, t);
+    } else {
+      const j = res.judges.find((x) => x.id === fileMatch[4]);
+      if (j && (superadmin || j.id === user.id)) payload = judgePayload(res, j);
+    }
+    if (!payload) fail(404, "ไม่พบประกาศนียบัตรหรือไม่มีสิทธิ์เข้าถึง");
+    const current = await fingerprint(key, payload);
+    if (!driveEnabled(env)) fail(503, "ยังไม่ได้ตั้งค่า Google Drive");
+    const row = await db
+      .prepare("SELECT * FROM certificate_files WHERE unit_key=?")
+      .bind(key)
+      .first();
+    if (method === "GET") {
+      if (!row || row.fingerprint !== current)
+        fail(404, "ยังไม่มีไฟล์ประกาศนียบัตรฉบับล่าสุด");
+      let data;
+      try {
+        data = await downloadFile(env, row.drive_file_id);
+      } catch (error) {
+        console.error("certificate drive download failed", error);
+        fail(502, "โหลดไฟล์จาก Google Drive ไม่สำเร็จ");
+      }
+      return new Response(data, {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Cache-Control": "private, no-store",
+          "X-Robots-Tag": "noindex, noarchive",
+        },
+      });
+    }
+    if (r.headers.get("x-certificate-fingerprint") !== current)
+      fail(409, "ข้อมูลประกาศนียบัตรเปลี่ยนแล้ว กรุณาโหลดหน้าใหม่");
+    if (row?.fingerprint === current) return json({ ok: true, stored: true });
+    if ((r.headers.get("content-type") || "").split(";")[0] !== "application/pdf")
+      fail(415, "ต้องเป็นไฟล์ PDF");
+    const reader = r.body?.getReader();
+    if (!reader) fail(400, "ไม่พบไฟล์");
+    const chunks = [];
+    let size = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > MAX_CERTIFICATE_PDF) {
+        await reader.cancel();
+        fail(413, "ไฟล์ PDF ใหญ่เกินกำหนด");
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+    if (String.fromCharCode(...bytes.slice(0, 5)) !== "%PDF-")
+      fail(415, "ต้องเป็นไฟล์ PDF");
+    let driveId;
+    try {
+      driveId = await uploadFile(env, db, "certificates", key + ".pdf", "application/pdf", bytes);
+    } catch (error) {
+      console.error("certificate drive upload failed", error);
+      fail(502, "บันทึกไฟล์ไปยัง Google Drive ไม่สำเร็จ");
+    }
+    await db
+      .prepare(
+        "INSERT INTO certificate_files(unit_key,competition_id,fingerprint,drive_file_id,size,created_by,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(unit_key) DO UPDATE SET fingerprint=excluded.fingerprint,drive_file_id=excluded.drive_file_id,size=excluded.size,created_by=excluded.created_by,created_at=excluded.created_at",
+      )
+      .bind(key, c.id, current, driveId, size, user.id, now())
+      .run();
+    if (row && row.drive_file_id !== driveId)
+      await deleteFiles(env, [row.drive_file_id]);
+    return json({ ok: true, stored: true }, 201);
   }
   fail(404, "ไม่พบรายการที่ร้องขอ");
 }

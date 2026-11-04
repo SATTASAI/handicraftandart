@@ -314,7 +314,7 @@ async function jpeg(canvas) {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
-function buildPdf(images) {
+export function buildPdf(images) {
   const enc = new TextEncoder(),
     parts = [],
     offsets = [];
@@ -364,27 +364,86 @@ function buildPdf(images) {
   return new Blob(parts, { type: "application/pdf" });
 }
 
-export async function downloadCertificates(certs, settings, filename, kind = "student") {
-  await loadFonts();
-  const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext("2d"),
-    pages = [],
-    img = await loadImage(settings.logo),
+// One saved file per unit: a team's student pages, a team's coach pages, or
+// one judge's page. Units already saved in Google Drive (same fingerprint)
+// are fetched instead of redrawn; new ones are uploaded after download.
+function unitsOf(cert, kind) {
+  if (kind === "judge")
+    return cert.judges.map((j) => ({ file: j.file, cert: { ...cert, judges: [j] } }));
+  return [{ file: cert.files?.[kind], cert }];
+}
+
+// Our PDFs hold one full-page JPEG per page; pull those images back out.
+export function jpegPages(bytes) {
+  const text = new TextDecoder("latin1").decode(bytes),
+    re = /\/Filter \/DCTDecode \/Length (\d+) >>\nstream\n/g,
+    out = [];
+  let m;
+  while ((m = re.exec(text))) {
+    const start = m.index + m[0].length;
+    out.push(bytes.slice(start, start + Number(m[1])));
+  }
+  return out;
+}
+
+async function savedPages(file) {
+  const r = await fetch("/api/certificate-files/" + file.key, { credentials: "same-origin" });
+  if (!r.ok) throw Error("not stored");
+  const pages = jpegPages(new Uint8Array(await r.arrayBuffer()));
+  if (!pages.length) throw Error("empty");
+  return pages;
+}
+
+async function saveUnit(file, pages) {
+  const r = await fetch("/api/certificate-files/" + file.key, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/pdf", "X-Certificate-Fingerprint": file.fingerprint },
+    body: buildPdf(pages),
+  });
+  if (r.ok) file.stored = true;
+}
+
+export async function downloadCertificates(certs, settings, filename, kind = "student", drive = false) {
+  const pages = [],
+    toSave = [];
+  let ctx, img, sigImgs;
+  async function prepare() {
+    if (ctx) return;
+    await loadFonts();
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    ctx = canvas.getContext("2d");
+    img = await loadImage(settings.logo);
     sigImgs = await Promise.all(
       (settings.signers || []).filter((s) => s.name || s.position || s.signature).map((s) => loadImage(s.signature)),
     );
-  useTheme(kind === "coach" ? "coach" : "student");
-  try {
-    for (const cert of certs)
-      for (const page of pagesOf(cert, kind)) {
-        drawCertificate(ctx, cert, page, settings, img, sigImgs);
-        pages.push(await jpeg(canvas));
-      }
-  } finally {
-    useTheme("student");
   }
+  for (const cert of certs)
+    for (const unit of unitsOf(cert, kind)) {
+      if (drive && unit.file?.stored) {
+        try {
+          pages.push(...(await savedPages(unit.file)));
+          continue;
+        } catch {
+          // Fall back to drawing it again.
+        }
+      }
+      await prepare();
+      const unitPages = [];
+      useTheme(kind === "coach" ? "coach" : "student");
+      try {
+        for (const page of pagesOf(unit.cert, kind)) {
+          drawCertificate(ctx, unit.cert, page, settings, img, sigImgs);
+          unitPages.push(await jpeg(ctx.canvas));
+        }
+      } finally {
+        useTheme("student");
+      }
+      pages.push(...unitPages);
+      if (drive && unit.file && unitPages.length) toSave.push([unit.file, unitPages]);
+    }
   if (!pages.length) throw Error("ไม่มีรายชื่อสำหรับสร้างประกาศนียบัตร");
   const url = URL.createObjectURL(buildPdf(pages));
   const a = document.createElement("a");
@@ -394,6 +453,11 @@ export async function downloadCertificates(certs, settings, filename, kind = "st
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
+  // Saving to Drive never blocks or fails the download itself.
+  for (const [file, unitPages] of toSave)
+    try {
+      await saveUnit(file, unitPages);
+    } catch {}
 }
 
 export const certificateCount = (cert, kind) => pagesOf(cert, kind).length;
