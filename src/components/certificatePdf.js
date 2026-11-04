@@ -1,6 +1,26 @@
 // Draws certificates on canvas (browser Thai fonts) and packs JPEG pages into a PDF.
-const FONT =
-  "Sarabun, Thonburi, 'Noto Sans Thai', 'Leelawadee UI', Tahoma, sans-serif";
+// ฟอนต์ฝังในระบบ (OFL): Charm สำหรับหัวเรื่อง/ชื่อ, Taviraj สำหรับเนื้อความ
+const FONT = "CertTaviraj, Thonburi, 'Noto Serif Thai', Tahoma, serif";
+const SCRIPT = "CertCharm, " + FONT;
+const FONT_FILES = [
+  ["CertTaviraj", "/fonts/Taviraj-Regular.woff", "400"],
+  ["CertTaviraj", "/fonts/Taviraj-DemiBold.woff", "600"],
+  ["CertTaviraj", "/fonts/Taviraj-Bold.woff", "700"],
+  ["CertCharm", "/fonts/Charm-Bold.woff2", "700"],
+];
+let fontsReady;
+function loadFonts() {
+  if (!fontsReady && typeof FontFace !== "undefined")
+    fontsReady = Promise.all(
+      FONT_FILES.map(([family, url, weight]) =>
+        new FontFace(family, `url(${url})`, { weight })
+          .load()
+          .then((f) => document.fonts.add(f))
+          .catch(() => {}),
+      ),
+    );
+  return fontsReady;
+}
 const W = 1754,
   H = 1240; // A4 landscape, 150 dpi
 const NAVY = "#1b2d52",
@@ -22,12 +42,12 @@ function spacing(ctx, px) {
   if ("letterSpacing" in ctx) ctx.letterSpacing = px + "px";
 }
 
-function line(ctx, text, y, size, weight = 400, color = NAVY_SOFT, maxW = W - 420, track = 0) {
+function line(ctx, text, y, size, weight = 400, color = NAVY_SOFT, maxW = W - 420, track = 0, family = FONT) {
   if (!text) return;
   let s = size;
   spacing(ctx, track);
   do {
-    ctx.font = `${weight} ${s}px ${FONT}`;
+    ctx.font = `${weight} ${s}px ${family}`;
     s -= 2;
   } while (ctx.measureText(text).width > maxW && s > 16);
   ctx.fillStyle = color;
@@ -128,7 +148,7 @@ function frame(ctx) {
 }
 
 function logo(ctx, img, y) {
-  const r = 66;
+  const r = 54;
   ctx.save();
   ctx.lineWidth = 2;
   ctx.strokeStyle = GOLD;
@@ -173,29 +193,29 @@ function awardBadge(ctx, text, y, color) {
 
 function drawCertificate(ctx, cert, student, settings, img) {
   frame(ctx);
-  logo(ctx, img, 190);
-  line(ctx, settings.organization, 322, 32, 600, NAVY, W - 420, 1);
-  line(ctx, "ประกาศนียบัตร", 418, 96, 700, NAVY, W - 420, 4);
-  divider(ctx, 458);
-  line(ctx, "ขอมอบไว้เพื่อแสดงว่า", 520, 32, 400, NAVY_SOFT);
-  line(ctx, `${student.first_name} ${student.last_name}`, 612, 74, 700, "#121c33");
-  line(ctx, withSchool(student.school || cert.school), 670, 32, 400, NAVY_SOFT);
+  logo(ctx, img, 146);
+  line(ctx, settings.organization, 248, 30, 600, NAVY, W - 420, 1);
+  line(ctx, "ประกาศนียบัตร", 404, 88, 700, NAVY, W - 420, 0, SCRIPT);
+  divider(ctx, 448);
+  line(ctx, "ขอมอบไว้เพื่อแสดงว่า", 496, 30, 400, NAVY_SOFT);
+  line(ctx, `${student.first_name} ${student.last_name}`, 606, 72, 700, "#121c33", W - 420, 0, SCRIPT);
+  line(ctx, withSchool(student.school || cert.school), 664, 32, 400, NAVY_SOFT);
   const accent = medalColors[cert.medal] || NAVY_SOFT;
   const award =
     cert.medal === "เข้าร่วม"
       ? "ได้เข้าร่วมการแข่งขัน"
       : `ได้รับรางวัล${cert.medal}${cert.rank_label ? " " + cert.rank_label : ""}`;
-  awardBadge(ctx, award, 752, accent);
+  awardBadge(ctx, award, 746, accent);
   line(
     ctx,
     `การแข่งขัน${cert.competition.title}${cert.competition.grade_label ? " ระดับชั้น " + cert.competition.grade_label : ""}`,
-    842,
+    834,
     34,
     600,
     NAVY,
   );
-  line(ctx, settings.event_line, 892, 30, 400, NAVY_SOFT);
-  if (settings.issued_text) line(ctx, settings.issued_text, 938, 28, 400, NAVY_SOFT);
+  line(ctx, settings.event_line, 884, 30, 400, NAVY_SOFT);
+  if (settings.issued_text) line(ctx, settings.issued_text, 930, 28, 400, NAVY_SOFT);
 
   const signers = (settings.signers || []).filter((s) => s.name || s.position);
   const slot = (W - 420) / Math.max(signers.length, 1);
@@ -285,9 +305,7 @@ function buildPdf(images) {
 }
 
 export async function downloadCertificates(certs, settings, filename) {
-  try {
-    await document.fonts?.load(`700 40px ${FONT}`);
-  } catch {}
+  await loadFonts();
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
