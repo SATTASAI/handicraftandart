@@ -305,7 +305,7 @@ test("catalog migration preserves populated competitions, registrations, ID docu
     .join("\n");
   await db.exec(seed);
   await db.exec(
-    await readFile("migrations/0016_remove_inclusive.sql", "utf8"),
+    await readFile("migrations/0017_remove_inclusive.sql", "utf8"),
   );
   assert.equal(
     (await db.prepare("SELECT COUNT(*) n FROM event_competitions").first()).n,
