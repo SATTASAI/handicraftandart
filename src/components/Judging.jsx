@@ -418,6 +418,27 @@ function CertificateSettings({ settings, onSaved }) {
           ข้อความวันที่ (เช่น ให้ไว้ ณ วันที่ 20 พฤศจิกายน 2568)
           <input value={s.issued_text} maxLength={100} onChange={(e) => set("issued_text", e.target.value)} />
         </label>
+        <div className="field">
+          โลโก้ (PNG/JPEG ไม่เกิน 200 KB)
+          <input
+            type="file"
+            accept="image/png,image/jpeg"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              if (f.size > 200 * 1024) return setMsg("ไฟล์โลโก้ใหญ่เกิน 200 KB");
+              const rd = new FileReader();
+              rd.onload = () => set("logo", rd.result);
+              rd.readAsDataURL(f);
+            }}
+          />
+          {s.logo && (
+            <span>
+              <img src={s.logo} alt="โลโก้" style={{ height: 56, verticalAlign: "middle" }} />{" "}
+              <button type="button" onClick={() => set("logo", "")}>ลบโลโก้</button>
+            </span>
+          )}
+        </div>
         {s.signers.map((g, i) => (
           <div className="student-fields" key={i}>
             <label className="field">

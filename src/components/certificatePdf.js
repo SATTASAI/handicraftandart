@@ -3,18 +3,29 @@ const FONT =
   "Sarabun, Thonburi, 'Noto Sans Thai', 'Leelawadee UI', Tahoma, sans-serif";
 const W = 1754,
   H = 1240; // A4 landscape, 150 dpi
+const NAVY = "#1b2d52",
+  NAVY_SOFT = "#3d4f73",
+  GOLD = "#b8933a",
+  GOLD_SOFT = "#e6d6ad",
+  PAPER = "#fdfbf6";
 const medalColors = {
-  เหรียญทอง: "#b8860b",
-  เหรียญเงิน: "#7d8590",
-  เหรียญทองแดง: "#a0522d",
-  เข้าร่วม: "#1e5aa8",
+  เหรียญทอง: "#a8801f",
+  เหรียญเงิน: "#6f7884",
+  เหรียญทองแดง: "#9a5a34",
+  เข้าร่วม: NAVY_SOFT,
 };
 
 const withSchool = (s) =>
   !s ? "" : /^(โรงเรียน|รร\.)/.test(s.trim()) ? s.trim() : "โรงเรียน" + s.trim();
 
-function line(ctx, text, y, size, weight = 400, color = "#1f2a44", maxW = W - 360) {
+function spacing(ctx, px) {
+  if ("letterSpacing" in ctx) ctx.letterSpacing = px + "px";
+}
+
+function line(ctx, text, y, size, weight = 400, color = NAVY_SOFT, maxW = W - 420, track = 0) {
+  if (!text) return;
   let s = size;
+  spacing(ctx, track);
   do {
     ctx.font = `${weight} ${s}px ${FONT}`;
     s -= 2;
@@ -22,64 +33,199 @@ function line(ctx, text, y, size, weight = 400, color = "#1f2a44", maxW = W - 36
   ctx.fillStyle = color;
   ctx.textAlign = "center";
   ctx.fillText(text, W / 2, y);
+  spacing(ctx, 0);
 }
 
-function drawCertificate(ctx, cert, student, settings) {
-  ctx.fillStyle = "#fffdf7";
-  ctx.fillRect(0, 0, W, H);
-  ctx.strokeStyle = "#1e3a6e";
-  ctx.lineWidth = 14;
-  ctx.strokeRect(40, 40, W - 80, H - 80);
-  ctx.strokeStyle = "#c9a227";
-  ctx.lineWidth = 4;
-  ctx.strokeRect(70, 70, W - 140, H - 140);
-  ctx.strokeRect(84, 84, W - 168, H - 168);
-  const accent = medalColors[cert.medal] || "#1e5aa8";
-  // Seal
+function diamond(ctx, x, y, r, fill, stroke) {
   ctx.beginPath();
-  ctx.arc(W / 2, 205, 70, 0, Math.PI * 2);
-  ctx.fillStyle = accent;
-  ctx.fill();
-  ctx.lineWidth = 6;
-  ctx.strokeStyle = "#c9a227";
-  ctx.stroke();
-  line(ctx, "ศ", 232, 80, 700, "#ffffff");
+  ctx.moveTo(x, y - r);
+  ctx.lineTo(x + r, y);
+  ctx.lineTo(x, y + r);
+  ctx.lineTo(x - r, y);
+  ctx.closePath();
+  if (fill) {
+    ctx.fillStyle = fill;
+    ctx.fill();
+  }
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.stroke();
+  }
+}
 
-  line(ctx, settings.organization, 330, 40, 600, "#1e3a6e");
-  line(ctx, "ประกาศนียบัตร", 430, 92, 700, "#1e3a6e");
-  line(ctx, "ขอมอบไว้เพื่อแสดงว่า", 500, 36);
-  line(ctx, `${student.first_name} ${student.last_name}`, 600, 76, 700, "#111827");
-  line(ctx, withSchool(student.school || cert.school), 665, 36);
+// เส้นคั่นทองตรงกลาง: เส้น — ข้าวหลามตัด — เส้น
+function divider(ctx, y, half = 170) {
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = GOLD;
+  ctx.beginPath();
+  ctx.moveTo(W / 2 - half, y);
+  ctx.lineTo(W / 2 - 22, y);
+  ctx.moveTo(W / 2 + 22, y);
+  ctx.lineTo(W / 2 + half, y);
+  ctx.stroke();
+  ctx.lineWidth = 2;
+  diamond(ctx, W / 2, y, 10, null, GOLD);
+  diamond(ctx, W / 2, y, 4, GOLD);
+  diamond(ctx, W / 2 - half - 10, y, 3.5, GOLD);
+  diamond(ctx, W / 2 + half + 10, y, 3.5, GOLD);
+}
+
+// ลายมุมเรขาคณิต: ขั้นบันไดซ้อน + ข้าวหลามตัด
+function corner(ctx, x, y, sx, sy) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(sx, sy);
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = GOLD;
+  ctx.beginPath();
+  ctx.moveTo(0, 150);
+  ctx.lineTo(0, 0);
+  ctx.lineTo(150, 0);
+  ctx.moveTo(18, 96);
+  ctx.lineTo(18, 18);
+  ctx.lineTo(96, 18);
+  ctx.stroke();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = NAVY;
+  ctx.beginPath();
+  ctx.moveTo(36, 60);
+  ctx.lineTo(36, 36);
+  ctx.lineTo(60, 36);
+  ctx.stroke();
+  diamond(ctx, 0, 0, 12, NAVY);
+  diamond(ctx, 0, 0, 5, GOLD);
+  diamond(ctx, 0, 150, 4, GOLD);
+  diamond(ctx, 150, 0, 4, GOLD);
+  ctx.restore();
+}
+
+function frame(ctx) {
+  ctx.fillStyle = PAPER;
+  ctx.fillRect(0, 0, W, H);
+  // ลายข้าวหลามตัดจาง ๆ ด้านหลัง
+  ctx.save();
+  ctx.globalAlpha = 0.045;
+  ctx.lineWidth = 2;
+  for (let r = 90; r <= 450; r += 60) diamond(ctx, W / 2, H / 2 + 40, r, null, NAVY);
+  ctx.restore();
+  // แถบกรมท่าด้านนอก + เส้นทองด้านใน
+  ctx.strokeStyle = NAVY;
+  ctx.lineWidth = 10;
+  ctx.strokeRect(36, 36, W - 72, H - 72);
+  ctx.strokeStyle = GOLD;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(58, 58, W - 116, H - 116);
+  const m = 82;
+  corner(ctx, m, m, 1, 1);
+  corner(ctx, W - m, m, -1, 1);
+  corner(ctx, m, H - m, 1, -1);
+  corner(ctx, W - m, H - m, -1, -1);
+  // ขีดกลางขอบบน-ล่าง
+  [58, H - 58].forEach((y) => {
+    diamond(ctx, W / 2, y, 9, PAPER, GOLD);
+    diamond(ctx, W / 2, y, 3.5, NAVY);
+  });
+}
+
+function logo(ctx, img, y) {
+  const r = 66;
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = GOLD;
+  ctx.beginPath();
+  ctx.arc(W / 2, y, r + 10, 0, Math.PI * 2);
+  ctx.stroke();
+  if (img) {
+    const k = Math.min((r * 2) / img.width, (r * 2) / img.height);
+    const w = img.width * k,
+      h = img.height * k;
+    ctx.drawImage(img, W / 2 - w / 2, y - h / 2, w, h);
+  } else {
+    ctx.beginPath();
+    ctx.arc(W / 2, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = NAVY;
+    ctx.fill();
+    diamond(ctx, W / 2, y, 34, null, GOLD);
+    ctx.lineWidth = 2;
+    diamond(ctx, W / 2, y, 18, GOLD);
+  }
+  ctx.restore();
+}
+
+function awardBadge(ctx, text, y, color) {
+  ctx.font = `700 46px ${FONT}`;
+  const w = Math.min(ctx.measureText(text).width + 120, W - 420),
+    h = 78;
+  const x = W / 2 - w / 2;
+  ctx.beginPath();
+  ctx.roundRect(x, y - h / 2, w, h, h / 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = GOLD_SOFT;
+  ctx.beginPath();
+  ctx.roundRect(x + 7, y - h / 2 + 7, w - 14, h - 14, (h - 14) / 2);
+  ctx.stroke();
+  ctx.textBaseline = "middle";
+  line(ctx, text, y + 2, 46, 700, "#ffffff", w - 80);
+  ctx.textBaseline = "alphabetic";
+}
+
+function drawCertificate(ctx, cert, student, settings, img) {
+  frame(ctx);
+  logo(ctx, img, 190);
+  line(ctx, settings.organization, 322, 32, 600, NAVY, W - 420, 1);
+  line(ctx, "ประกาศนียบัตร", 418, 96, 700, NAVY, W - 420, 4);
+  divider(ctx, 458);
+  line(ctx, "ขอมอบไว้เพื่อแสดงว่า", 520, 32, 400, NAVY_SOFT);
+  line(ctx, `${student.first_name} ${student.last_name}`, 612, 74, 700, "#121c33");
+  line(ctx, withSchool(student.school || cert.school), 670, 32, 400, NAVY_SOFT);
+  const accent = medalColors[cert.medal] || NAVY_SOFT;
   const award =
     cert.medal === "เข้าร่วม"
       ? "ได้เข้าร่วมการแข่งขัน"
       : `ได้รับรางวัล${cert.medal}${cert.rank_label ? " " + cert.rank_label : ""}`;
-  line(ctx, award, 750, 52, 700, accent);
+  awardBadge(ctx, award, 752, accent);
   line(
     ctx,
     `การแข่งขัน${cert.competition.title}${cert.competition.grade_label ? " ระดับชั้น " + cert.competition.grade_label : ""}`,
-    815,
-    36,
+    842,
+    34,
+    600,
+    NAVY,
   );
-  line(ctx, settings.event_line, 870, 32);
-  if (settings.issued_text) line(ctx, settings.issued_text, 925, 30);
+  line(ctx, settings.event_line, 892, 30, 400, NAVY_SOFT);
+  if (settings.issued_text) line(ctx, settings.issued_text, 938, 28, 400, NAVY_SOFT);
 
   const signers = (settings.signers || []).filter((s) => s.name || s.position);
-  const slot = (W - 300) / Math.max(signers.length, 1);
+  const slot = (W - 420) / Math.max(signers.length, 1);
   signers.forEach((s, i) => {
-    const x = 150 + slot * i + slot / 2;
-    ctx.strokeStyle = "#475569";
-    ctx.lineWidth = 2;
+    const x = 210 + slot * i + slot / 2;
+    ctx.strokeStyle = NAVY_SOFT;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 5]);
     ctx.beginPath();
-    ctx.moveTo(x - 190, 1045);
-    ctx.lineTo(x + 190, 1045);
+    ctx.moveTo(x - 170, 1040);
+    ctx.lineTo(x + 170, 1040);
     ctx.stroke();
+    ctx.setLineDash([]);
     ctx.textAlign = "center";
-    ctx.fillStyle = "#1f2a44";
-    ctx.font = `600 30px ${FONT}`;
-    if (s.name) ctx.fillText(`(${s.name})`, x, 1090);
-    ctx.font = `400 26px ${FONT}`;
-    if (s.position) ctx.fillText(s.position, x, 1130);
+    ctx.fillStyle = NAVY;
+    ctx.font = `600 28px ${FONT}`;
+    if (s.name) ctx.fillText(`(${s.name})`, x, 1084);
+    ctx.fillStyle = NAVY_SOFT;
+    ctx.font = `400 24px ${FONT}`;
+    if (s.position) ctx.fillText(s.position, x, 1120);
+  });
+}
+
+function loadImage(src) {
+  if (!src) return Promise.resolve(null);
+  return new Promise((ok) => {
+    const img = new Image();
+    img.onload = () => ok(img);
+    img.onerror = () => ok(null);
+    img.src = src;
   });
 }
 
@@ -146,10 +292,11 @@ export async function downloadCertificates(certs, settings, filename) {
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d"),
-    pages = [];
+    pages = [],
+    img = await loadImage(settings.logo);
   for (const cert of certs)
     for (const student of cert.students) {
-      drawCertificate(ctx, cert, student, settings);
+      drawCertificate(ctx, cert, student, settings, img);
       pages.push(await jpeg(canvas));
     }
   if (!pages.length) throw Error("ไม่มีรายชื่อนักเรียนสำหรับสร้างประกาศนียบัตร");

@@ -9,10 +9,13 @@ export const MEDALS = [
 export const RANK_LABELS = ["ชนะเลิศ", "รองชนะเลิศอันดับ 1", "รองชนะเลิศอันดับ 2"];
 export const DEFAULT_CERTIFICATE = {
   organization: "ศูนย์เครือข่ายสองพี่น้อง ห้วยแม่เพรียง ป่าเด็ง",
-  event_line:
-    "งานศิลปหัตถกรรมนักเรียน ครั้งที่ 73 ปีการศึกษา 2568 ระดับศูนย์เครือข่าย",
+  event_line: "การแข่งขันศิลปหัตถกรรมนักเรียน ประจำปีการศึกษา 2569",
   issued_text: "",
-  signers: [{ name: "", position: "ประธานศูนย์เครือข่าย" }],
+  logo: "",
+  signers: [
+    { name: "", position: "ประธานศูนย์เครือข่าย" },
+    { name: "", position: "ประธานกรรมการดำเนินงาน" },
+  ],
 };
 
 export const medalFor = (percent) =>
@@ -193,7 +196,10 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
   }
   if (path === "/api/admin/judges" && method === "POST") {
     if (!superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
-    const b = await body(r);
+    const b = await body(r, 400000);
+    const logo = typeof b.logo === "string" ? b.logo : "";
+    if (logo && (logo.length > 300000 || !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(logo)))
+      fail(400, "โลโก้ต้องเป็นไฟล์ PNG/JPEG ขนาดไม่เกิน 200 KB");
     const c = await competition(b.competition_id);
     if (!uuid(b.judge_id) || typeof b.assigned !== "boolean")
       fail(400, "ข้อมูลไม่ถูกต้อง");
@@ -352,13 +358,17 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
     return json({ settings: await certificateSettings(db) });
   if (path === "/api/certificate-settings" && method === "POST") {
     if (!superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
-    const b = await body(r);
+    const b = await body(r, 400000);
+    const logo = typeof b.logo === "string" ? b.logo : "";
+    if (logo && (logo.length > 300000 || !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(logo)))
+      fail(400, "โลโก้ต้องเป็นไฟล์ PNG/JPEG ขนาดไม่เกิน 200 KB");
     const s = (v, m) => (typeof v === "string" ? v.trim().slice(0, m) : "");
     const signers = Array.isArray(b.signers) ? b.signers.slice(0, 3) : [];
     const value = {
       organization: s(b.organization, 150) || DEFAULT_CERTIFICATE.organization,
       event_line: s(b.event_line, 200) || DEFAULT_CERTIFICATE.event_line,
       issued_text: s(b.issued_text, 100),
+      logo,
       signers: signers
         .map((x) => ({ name: s(x?.name, 100), position: s(x?.position, 120) }))
         .filter((x) => x.name || x.position),
