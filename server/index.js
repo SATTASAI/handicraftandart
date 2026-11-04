@@ -119,8 +119,38 @@ async function api(r, env, ctx) {
         .prepare("SELECT id FROM account_bootstrap WHERE id=1")
         .first()),
     });
+  const systemClosed =
+    (
+      await db
+        .prepare("SELECT value FROM app_settings WHERE key='system_enabled'")
+        .first()
+    )?.value === "false";
   if (path === "/api/me" && r.method === "GET")
-    return json({ user: publicUser(await currentUser(r, db)) });
+    return json({
+      user: publicUser(await currentUser(r, db)),
+      system_closed: systemClosed,
+    });
+  if (
+    systemClosed &&
+    !["/api/login", "/api/logout"].includes(path) &&
+    !path.startsWith("/api/password/") &&
+    !(await currentUser(r, db))?.is_superadmin
+  )
+    fail(503, "ระบบปิดใช้งานชั่วคราว กรุณาติดต่อผู้ดูแลระบบ");
+  if (path === "/api/admin/system" && r.method === "POST") {
+    const user = await currentUser(r, db);
+    if (!user) fail(401, "กรุณาเข้าสู่ระบบ");
+    if (!user.is_superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
+    const b = await body(r);
+    if (typeof b.enabled !== "boolean") fail(400, "ข้อมูลไม่ถูกต้อง");
+    await db
+      .prepare(
+        "INSERT INTO app_settings(key,value,updated_by,updated_at) VALUES('system_enabled',?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
+      )
+      .bind(b.enabled ? "true" : "false", user.id, now())
+      .run();
+    return json({ system_closed: !b.enabled });
+  }
   if (path === "/api/signup" && r.method === "POST") {
     // Schools share one public IP on network Wi-Fi; keep per-IP limits generous.
     await limit(db, r, "signup", 60, 3600);
@@ -221,6 +251,7 @@ async function api(r, env, ctx) {
         "pbkdf2-sha256$100000$" + "0".repeat(64) + "$" + "0".repeat(64),
     );
     if (!user || !valid) fail(401, "อีเมลหรือรหัสผ่านไม่ถูกต้อง");
+    if (systemClosed && !user.is_superadmin) fail(503, "ระบบปิดใช้งานชั่วคราว กรุณาติดต่อผู้ดูแลระบบ");
     const token = random();
     await db
       .prepare("INSERT INTO account_sessions VALUES(?,?,?)")
