@@ -2,6 +2,13 @@ import CompetitionRules, { studentCount } from "./CompetitionRules";
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import {
+  buildTemplate,
+  normalizeGender,
+  normalizeGrade,
+  parseTeam,
+  readFirstSheet,
+} from "../xlsx";
+import {
   CertificatesPanel,
   JudgeAssignment,
   JudgePanel,
@@ -129,23 +136,143 @@ function StudentPhoto({ student, index, disabled, onChange, onUploading }) {
     </div>
   );
 }
-function RegistrationForm({ competition, user, existing, onDone, onCancel }) {
+const XLSX_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+function downloadTemplate() {
+  const url = URL.createObjectURL(
+    new Blob([buildTemplate()], { type: XLSX_TYPE }),
+  );
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "template-ลงทะเบียนแข่งขัน.xlsx";
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+const squash = (s) => String(s || "").replace(/\s+/g, "");
+function matchVariant(policy, value) {
+  const v = squash(value);
+  if (!v || !policy.team_variants) return null;
+  return (
+    policy.team_variants.find(
+      (x) => squash(x.key) === v || squash(x.label) === v,
+    ) ||
+    policy.team_variants.find(
+      (x) => squash(x.label).includes(v) || v.includes(squash(x.label)),
+    ) ||
+    null
+  );
+}
+function ImportButton({ competition, disabled, onImported }) {
+  const input = useRef(null),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  async function pick(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setError("");
+    if (!/\.xlsx$/i.test(file.name)) {
+      setError("รองรับเฉพาะไฟล์ .xlsx");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setError("ไฟล์ใหญ่เกิน 2 MB");
+      return;
+    }
+    setBusy(true);
+    try {
+      const team = parseTeam(await readFirstSheet(await file.arrayBuffer()));
+      const policy = competition.rules?.policy || {};
+      const variant = matchVariant(policy, team.variant);
+      const max = variant
+        ? variant.max_students
+        : policy.team_variants
+          ? Math.max(...policy.team_variants.map((v) => v.max_students ?? 0))
+          : competition.max_students;
+      if (max != null && team.students.length > max)
+        throw new Error(
+          `ไฟล์มีนักเรียน ${team.students.length} คน เกินที่รายการกำหนด (${max} คน)`,
+        );
+      onImported({ ...team, file_name: file.name });
+    } catch (err) {
+      setError(err.message || "อ่านไฟล์ไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <input
+        ref={input}
+        type="file"
+        hidden
+        accept={".xlsx," + XLSX_TYPE}
+        onChange={pick}
+      />
+      <button
+        className="secondary"
+        type="button"
+        disabled={disabled || busy}
+        onClick={() => input.current?.click()}
+      >
+        {busy ? "กำลังอ่านไฟล์…" : "นำเข้า xlsx"}
+      </button>
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
+function RegistrationForm({
+  competition,
+  user,
+  existing,
+  imported,
+  onDone,
+  onCancel,
+}) {
   const rules = competition.rules || {},
     policy = rules.policy || {};
   const [variant, setVariant] = useState(
-    existing?.variant || policy.team_variants?.[0]?.key || "",
+    existing?.variant ||
+      matchVariant(policy, imported?.variant)?.key ||
+      policy.team_variants?.[0]?.key ||
+      "",
   );
   const selectedVariant = policy.team_variants?.find((v) => v.key === variant);
   const minStudents = selectedVariant?.min_students ?? competition.min_students;
   const maxStudents = selectedVariant?.max_students ?? competition.max_students;
+  const importedCoaches =
+    competition.catalog_key && imported?.coaches?.length
+      ? imported.coaches.slice(0, rules.coach_limits?.max || undefined)
+      : null;
   const [coaches, setCoaches] = useState(
     existing?.coaches?.length
       ? existing.coaches
-      : Array.from({ length: rules.coach_limits?.min || 1 }, (_, i) => ({
+      : importedCoaches
+        ? [
+            ...importedCoaches,
+            ...Array.from(
+              {
+                length: Math.max(
+                  0,
+                  (rules.coach_limits?.min || 1) - importedCoaches.length,
+                ),
+              },
+              () => ({ name: "" }),
+            ),
+          ]
+        : Array.from({ length: rules.coach_limits?.min || 1 }, (_, i) => ({
           name: i === 0 ? user.name : "",
         })),
   );
-  const [workUrl, setWorkUrl] = useState(existing?.work_url || "");
+  const [workUrl, setWorkUrl] = useState(
+    existing?.work_url || imported?.work_url || "",
+  );
   const blank = () => ({
     key: crypto.randomUUID(),
     first_name: "",
@@ -155,9 +282,24 @@ function RegistrationForm({ competition, user, existing, onDone, onCancel }) {
     school: user.school,
     document_id: "",
   });
+  const fromImport = () => {
+    const list = imported.students.map((s) => ({
+      ...blank(),
+      first_name: s.first_name.slice(0, 100),
+      last_name: s.last_name.slice(0, 100),
+      grade: (policy.allowed_grades ? normalizeGrade(s.grade) : s.grade).slice(
+        0,
+        20,
+      ),
+      gender: normalizeGender(s.gender),
+      school: (s.school || user.school).slice(0, 150),
+    }));
+    while (list.length < minStudents) list.push(blank());
+    return list;
+  };
   const [students, setStudents] = useState(
     existing?.students.map((s) => ({ ...s, key: s.id })) ||
-      Array.from({ length: minStudents }, blank),
+      (imported ? fromImport() : Array.from({ length: minStudents }, blank)),
   );
   const [busy, setBusy] = useState(false),
     [uploading, setUploading] = useState(0),
@@ -223,6 +365,16 @@ function RegistrationForm({ competition, user, existing, onDone, onCancel }) {
         </div>
       )}
       <CompetitionRules competition={competition} />
+      {imported && (
+        <div className="notice">
+          นำเข้าจาก {imported.file_name}: นักเรียน {imported.students.length} คน
+          ตรวจข้อมูลแล้ว<strong>แนบภาพบัตรประชาชนของนักเรียนทีละคน</strong>
+          ก่อนส่ง
+          {imported.variant && !matchVariant(policy, imported.variant)
+            ? ` · ไม่พบชุดการแสดง “${imported.variant}” กรุณาเลือกเอง`
+            : ""}
+        </div>
+      )}
       <form onSubmit={submit}>
         <fieldset disabled={blocked}>
           {policy.team_variants && (
@@ -863,6 +1015,7 @@ export default function CompetitionRegistration({ user, tab, onTab }) {
           user={user}
           competition={form.competition}
           existing={form.existing}
+          imported={form.imported}
           onCancel={() => setForm(null)}
           onDone={() => {
             setForm(null);
@@ -941,6 +1094,16 @@ export default function CompetitionRegistration({ user, tab, onTab }) {
               </select>
             </label>
           </div>
+          {coach && (
+            <div className="notice">
+              ลงทะเบียนด้วยไฟล์ Excel: ดาวน์โหลด template (1 ไฟล์ = 1 ทีม)
+              กรอกรายชื่อ แล้วกด “นำเข้า xlsx” บนรายการที่ต้องการ
+              ภาพบัตรประชาชนยังต้องแนบรายคนในหน้าเว็บ{" "}
+              <button className="secondary" type="button" onClick={downloadTemplate}>
+                ดาวน์โหลด template .xlsx
+              </button>
+            </div>
+          )}
           <p className="muted">
             พบ {filtered.length} รายการ · แสดงครั้งละ 24 รายการ ·
             เกณฑ์จากเอกสารปีการศึกษา 2568
@@ -992,16 +1155,26 @@ export default function CompetitionRegistration({ user, tab, onTab }) {
                       สถานที่: {c.venue || "รอประกาศ"}
                     </p>
                     {coach ? (
-                      <button
-                        className="primary"
-                        disabled={!c.registration_open}
-                        onClick={() => {
-                          setSuccess("");
-                          setForm({ competition: c });
-                        }}
-                      >
-                        ลงทะเบียนนักเรียน
-                      </button>
+                      <div className="form-actions">
+                        <button
+                          className="primary"
+                          disabled={!c.registration_open}
+                          onClick={() => {
+                            setSuccess("");
+                            setForm({ competition: c });
+                          }}
+                        >
+                          ลงทะเบียนนักเรียน
+                        </button>
+                        <ImportButton
+                          competition={c}
+                          disabled={!c.registration_open}
+                          onImported={(imported) => {
+                            setSuccess("");
+                            setForm({ competition: c, imported });
+                          }}
+                        />
+                      </div>
                     ) : (
                       <p className="muted">
                         ผู้ฝึกซ้อมเป็นผู้ลงทะเบียนให้นักเรียน
