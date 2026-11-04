@@ -230,3 +230,19 @@ test("superadmin deletes accounts and resets competition data", async (t) => {
   assert.equal((await db.prepare("SELECT COUNT(*) n FROM account_users").first()).n, 2);
   assert.equal((await db.prepare("PRAGMA foreign_key_check").all()).results.length, 0);
 });
+
+test("superadmin can close and reopen the system", async (t) => {
+  const { request, signup } = await runtime(t);
+  const admin = await signup("admin"),
+    coach = await signup("coachz");
+  assert.equal((await request("/admin/system", { enabled: false }, coach.cookie)).status, 403);
+  assert.equal((await request("/admin/system", { enabled: false }, admin.cookie)).status, 200);
+  assert.equal((await request("/me", undefined, coach.cookie)).body.system_closed, true);
+  assert.equal((await request("/competitions", undefined, coach.cookie)).status, 503);
+  assert.equal((await request("/competitions", undefined, admin.cookie)).status, 200);
+  assert.equal((await signup("late")).status, 503);
+  assert.equal((await request("/login", { email: "coachz@example.test", password: "test-only-passphrase-2026" })).status, 503);
+  assert.equal((await request("/login", { email: "admin@example.test", password: "test-only-passphrase-2026" })).status, 200);
+  assert.equal((await request("/admin/system", { enabled: true }, admin.cookie)).status, 200);
+  assert.equal((await request("/competitions", undefined, coach.cookie)).status, 200);
+});

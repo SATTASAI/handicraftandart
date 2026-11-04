@@ -582,7 +582,28 @@ function UsersPanel() {
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
     [organizerBusy, setOrganizerBusy] = useState(false),
-    [notice, setNotice] = useState("");
+    [notice, setNotice] = useState(""),
+    [systemClosed, setSystemClosed] = useState(null);
+  async function toggleSystem() {
+    const next = !systemClosed;
+    if (
+      next &&
+      !window.confirm(
+        "ปิดใช้งานระบบ? ผู้ใช้ทุกคนยกเว้น superadmin จะใช้งานไม่ได้จนกว่าจะเปิดอีกครั้ง",
+      )
+    )
+      return;
+    setOrganizerBusy(true);
+    setError("");
+    try {
+      const r = await api("/admin/system", { enabled: !next });
+      setSystemClosed(r.system_closed);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setOrganizerBusy(false);
+    }
+  }
   async function setOrganizer(id, enabled) {
     const previousUser = users.find((u) => u.id === id);
     setUsers((previous) =>
@@ -652,6 +673,9 @@ function UsersPanel() {
   }
   useEffect(() => {
     let active = true;
+    api("/me")
+      .then((r) => active && setSystemClosed(Boolean(r.system_closed)))
+      .catch(() => {});
     api("/admin/users")
       .then((r) => active && setUsers(r.users))
       .catch((e) => active && setError(e.message))
@@ -722,6 +746,23 @@ function UsersPanel() {
           ))}
         </ul>
       )}
+      <div className="section-heading">
+        <h2>สถานะระบบ</h2>
+        {systemClosed !== null && (
+          <span className="badge">{systemClosed ? "ปิดใช้งาน" : "เปิดใช้งาน"}</span>
+        )}
+      </div>
+      <p className="muted">
+        เมื่อปิดระบบ ผู้ใช้ทุกคนยกเว้น superadmin จะเข้าสู่ระบบและใช้งานไม่ได้
+      </p>
+      <button
+        type="button"
+        className={systemClosed ? "primary" : "danger-button"}
+        disabled={organizerBusy || systemClosed === null}
+        onClick={toggleSystem}
+      >
+        {systemClosed ? "เปิดใช้งานระบบ" : "ปิดใช้งานระบบ"}
+      </button>
       <div className="section-heading">
         <h2>ล้างข้อมูล</h2>
       </div>
@@ -1084,12 +1125,15 @@ function App() {
     [user, setUser] = useState(null),
     [ready, setReady] = useState(false),
     [error, setError] = useState(""),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [systemClosed, setSystemClosed] = useState(false);
   async function load() {
     setReady(false);
     setError("");
     try {
-      setUser((await api("/me")).user);
+      const me = await api("/me");
+      setUser(me.user);
+      setSystemClosed(Boolean(me.system_closed));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -1137,6 +1181,17 @@ function App() {
       setBusy(false);
     }
   }
+  if (ready && !error && user && systemClosed && !user.is_superadmin)
+    return (
+      <main id="main" className="public-screen">
+        <div className="panel connection-error">
+          <p role="alert">ระบบปิดใช้งานชั่วคราว กรุณาติดต่อผู้ดูแลระบบ</p>
+          <button className="secondary" onClick={logout} disabled={busy}>
+            ออกจากระบบ
+          </button>
+        </div>
+      </main>
+    );
   if (ready && !error && user)
     return (
       <>
