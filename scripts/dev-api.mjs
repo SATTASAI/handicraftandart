@@ -11,6 +11,7 @@ export function devApi() {
             { type: "ESModule", path: "server/security.js" },
             { type: "ESModule", path: "server/registrations.js" },
             { type: "ESModule", path: "server/catalog.js" },
+            { type: "ESModule", path: "server/mail.js" },
           ],
           compatibilityDate: "2026-11-02",
           d1Databases: ["DB"],

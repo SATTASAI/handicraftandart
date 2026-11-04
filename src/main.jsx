@@ -205,6 +205,11 @@ function Auth({ signup, onUser }) {
               />
             </label>
             <Password signup={signup} />
+            {!signup && (
+              <p className="forgot-link">
+                <Link to="/forgot-password">ลืมรหัสผ่าน?</Link>
+              </p>
+            )}
             {signup && (
               <fieldset className="role-group">
                 <legend>
@@ -240,6 +245,168 @@ function Auth({ signup, onUser }) {
         <p className="privacy-note">ใช้บัญชีเดียวสำหรับบทบาทที่คุณเลือก</p>
       </section>
     </div>
+  );
+}
+function AuthCard({ title, subtitle, children }) {
+  return (
+    <div className="auth-screen single">
+      <section className="auth-card" aria-labelledby="auth-title">
+        <h2 id="auth-title">{title}</h2>
+        <p className="subtitle">{subtitle}</p>
+        {children}
+        <p className="auth-footer">
+          <Link to="/login">กลับไปหน้าเข้าสู่ระบบ</Link>
+        </p>
+      </section>
+    </div>
+  );
+}
+function ForgotPassword() {
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [sent, setSent] = useState(false);
+  async function submit(e) {
+    e.preventDefault();
+    if (busy) return;
+    setError("");
+    setBusy(true);
+    try {
+      await api(
+        "/password/forgot",
+        Object.fromEntries(new FormData(e.currentTarget)),
+      );
+      setSent(true);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <AuthCard
+      title="ลืมรหัสผ่าน"
+      subtitle="กรอกอีเมลที่ใช้สมัคร ระบบจะส่งลิงก์ตั้งรหัสผ่านใหม่ให้"
+    >
+      {sent ? (
+        <div className="notice" role="status">
+          <strong>ตรวจสอบอีเมลของคุณ</strong>
+          <p>
+            หากอีเมลนี้มีบัญชีในระบบ
+            จะได้รับลิงก์ตั้งรหัสผ่านใหม่ภายในไม่กี่นาที (ลิงก์ใช้ได้ 30 นาที)
+            อย่าลืมดูในโฟลเดอร์จดหมายขยะ
+          </p>
+        </div>
+      ) : (
+        <>
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
+          <form onSubmit={submit} aria-busy={busy}>
+            <fieldset disabled={busy}>
+              <label className="field">
+                อีเมล
+                <input
+                  name="email"
+                  type="email"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  required
+                  maxLength={254}
+                  placeholder="name@example.com"
+                />
+              </label>
+              <button className="primary submit" type="submit">
+                {busy ? "กำลังส่ง…" : "ส่งลิงก์ตั้งรหัสผ่านใหม่"}
+              </button>
+            </fieldset>
+          </form>
+        </>
+      )}
+    </AuthCard>
+  );
+}
+function ResetPassword() {
+  const [token] = useState(
+      () => new URLSearchParams(location.hash.slice(1)).get("token") || "",
+    ),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [done, setDone] = useState(false);
+  useEffect(() => {
+    // Remove the token from the address bar and history.
+    if (location.hash) history.replaceState({}, "", location.pathname);
+  }, []);
+  async function submit(e) {
+    e.preventDefault();
+    if (busy) return;
+    const form = new FormData(e.currentTarget);
+    if (form.get("password") !== form.get("confirm")) {
+      setError("รหัสผ่านทั้งสองช่องไม่ตรงกัน");
+      return;
+    }
+    setError("");
+    setBusy(true);
+    try {
+      await api("/password/reset", { token, password: form.get("password") });
+      setDone(true);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <AuthCard
+      title="ตั้งรหัสผ่านใหม่"
+      subtitle="ตั้งรหัสผ่านใหม่แล้วเข้าสู่ระบบอีกครั้ง ทุกอุปกรณ์จะถูกออกจากระบบ"
+    >
+      {done ? (
+        <div className="notice" role="status">
+          <strong>เปลี่ยนรหัสผ่านเรียบร้อย</strong>
+          <p>
+            <Link to="/login">เข้าสู่ระบบด้วยรหัสผ่านใหม่</Link>
+          </p>
+        </div>
+      ) : !token ? (
+        <p className="error" role="alert">
+          ลิงก์ไม่ถูกต้อง กรุณา <Link to="/forgot-password">ขอลิงก์ใหม่</Link>
+        </p>
+      ) : (
+        <>
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
+          <form
+            onSubmit={submit}
+            aria-busy={busy}
+            onChange={() => error && setError("")}
+          >
+            <fieldset disabled={busy}>
+              <Password signup />
+              <label className="field">
+                ยืนยันรหัสผ่านใหม่
+                <input
+                  name="confirm"
+                  type="password"
+                  required
+                  minLength={12}
+                  maxLength={128}
+                  autoComplete="new-password"
+                />
+              </label>
+              <button className="primary submit" type="submit">
+                {busy ? "กำลังบันทึก…" : "บันทึกรหัสผ่านใหม่"}
+              </button>
+            </fieldset>
+          </form>
+        </>
+      )}
+    </AuthCard>
   );
 }
 const sectionList = [
@@ -818,8 +985,14 @@ function App() {
   }, []);
   useEffect(() => {
     if (!ready || error) return;
-    if (user && ["/login", "/signup"].includes(path)) go("/");
-    if (!user && !["/login", "/signup"].includes(path)) go("/login");
+    const publicPaths = [
+      "/login",
+      "/signup",
+      "/forgot-password",
+      "/reset-password",
+    ];
+    if (user && publicPaths.includes(path)) go("/");
+    if (!user && !publicPaths.includes(path)) go("/login");
     if (!user)
       document.title =
         (path === "/signup" ? "สมัครบัญชี" : "เข้าสู่ระบบ") + " · ศิลปหัตถกรรม";
@@ -862,6 +1035,10 @@ function App() {
             ลองใหม่
           </button>
         </div>
+      ) : path === "/forgot-password" ? (
+        <ForgotPassword />
+      ) : path === "/reset-password" ? (
+        <ResetPassword />
       ) : (
         <Auth key={path} signup={path === "/signup"} onUser={setUser} />
       )}

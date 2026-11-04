@@ -4,7 +4,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { digest, now } from "../server/security.js";
 const origin = "https://accounts.example.test";
-async function runtime(t) {
+async function runtime(t, extra = {}) {
   const mf = new Miniflare(
     convertV4MiniflareOptions({
       modules: [
@@ -13,9 +13,11 @@ async function runtime(t) {
         { type: "ESModule", path: "server/registrations.js" },
         { type: "ESModule", path: "server/catalog.js" },
         { type: "ESModule", path: "server/judging.js" },
+        { type: "ESModule", path: "server/mail.js" },
       ],
       compatibilityDate: "2026-11-02",
       d1Databases: ["DB"],
+      ...extra,
     }),
   );
   t.after(() => mf.dispose());
@@ -276,4 +278,124 @@ test("signup validation, cross-origin protection, body limits and rate limits", 
       await request("/signup", account(`bulk${i}@example.test`, ["coach"]))
     ).status;
   assert.equal(limited, 429);
+});
+
+test("forgot password emails a one-time link via Resend and reset revokes sessions", async (t) => {
+  const sent = [];
+  const { db, request } = await runtime(t, {
+    bindings: { RESEND_API_KEY: "re_test_only" },
+    outboundService: async (req) => {
+      sent.push({
+        url: req.url,
+        auth: req.headers.get("authorization"),
+        body: await req.json(),
+      });
+      return new Response(JSON.stringify({ id: "test" }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+  const user = await request("/signup", account());
+  assert.equal(user.status, 201);
+  const waitMail = async (n) => {
+    for (let i = 0; i < 50 && sent.length < n; i++)
+      await new Promise((r) => setTimeout(r, 20));
+    assert.equal(sent.length, n);
+  };
+  const missing = await request("/password/forgot", {
+    email: "missing@example.test",
+  });
+  assert.equal(missing.status, 200);
+  assert.equal(
+    (await request("/password/forgot", { email: "not-an-email" })).status,
+    400,
+  );
+  const ok = await request("/password/forgot", {
+    email: " TEACHER@EXAMPLE.TEST ",
+  });
+  assert.deepEqual(ok.body, missing.body);
+  await waitMail(1);
+  assert.equal(sent[0].url, "https://api.resend.com/emails");
+  assert.equal(sent[0].auth, "Bearer re_test_only");
+  assert.deepEqual(sent[0].body.to, [account().email]);
+  assert.match(sent[0].body.from, /mail\.banpadengschool\.ac\.th/);
+  const token = sent[0].body.text.match(/#token=([a-f0-9]{64})/)[1];
+  assert(
+    await db
+      .prepare("SELECT 1 FROM account_password_resets WHERE token_hash=?")
+      .bind(await digest(token))
+      .first(),
+  );
+  assert.equal(
+    (await request("/password/reset", { token, password: "short" })).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request("/password/reset", {
+        token: "0".repeat(64),
+        password: "new-test-passphrase-2026",
+      })
+    ).status,
+    400,
+  );
+  const reset = await request("/password/reset", {
+    token,
+    password: "new-test-passphrase-2026",
+  });
+  assert.equal(reset.status, 200, JSON.stringify(reset.body));
+  assert.equal((await request("/me", undefined, user.cookie)).body.user, null);
+  assert.equal(
+    (
+      await request("/password/reset", {
+        token,
+        password: "another-passphrase-2026",
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request("/login", {
+        email: account().email,
+        password: account().password,
+      })
+    ).status,
+    401,
+  );
+  assert.equal(
+    (
+      await request("/login", {
+        email: account().email,
+        password: "new-test-passphrase-2026",
+      })
+    ).status,
+    200,
+  );
+  await db.prepare("UPDATE account_password_resets SET expires_at=0").run();
+  await request("/password/forgot", { email: account().email });
+  await waitMail(2);
+  const expiredToken = sent[1].body.text.match(/#token=([a-f0-9]{64})/)[1];
+  await db
+    .prepare("UPDATE account_password_resets SET expires_at=?")
+    .bind(now() - 1)
+    .run();
+  assert.equal(
+    (
+      await request("/password/reset", {
+        token: expiredToken,
+        password: "expired-passphrase-2026",
+      })
+    ).status,
+    400,
+  );
+});
+
+test("forgot password reports unavailable when Resend is not configured", async (t) => {
+  const { request } = await runtime(t);
+  assert.equal(
+    (await request("/password/forgot", { email: "teacher@example.test" }))
+      .status,
+    503,
+  );
 });

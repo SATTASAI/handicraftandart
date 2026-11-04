@@ -1,5 +1,6 @@
 import { registrationsApi } from "./registrations.js";
 import { judgingApi } from "./judging.js";
+import { sendEmail, passwordResetEmail } from "./mail.js";
 import {
   now,
   random,
@@ -95,7 +96,7 @@ async function limit(db, r, action, maximum, seconds, perIp = true) {
   if (result.attempts > maximum)
     fail(429, "ลองหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่");
 }
-async function api(r, env) {
+async function api(r, env, ctx) {
   if (!env.DB) fail(503, "ยังไม่ได้เชื่อมต่อฐานข้อมูล");
   const path = new URL(r.url).pathname,
     db = env.DB;
@@ -228,6 +229,86 @@ async function api(r, env) {
       "Set-Cookie": sessionCookie(r, token),
     });
   }
+  if (path === "/api/password/forgot" && r.method === "POST") {
+    await limit(db, r, "password-forgot", 30, 3600);
+    const b = await body(r),
+      email = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      fail(400, "กรุณากรอกอีเมลให้ถูกต้อง");
+    if (!env.RESEND_API_KEY) fail(503, "ระบบส่งอีเมลยังไม่พร้อมใช้งาน");
+    await limit(db, r, "password-forgot-email:" + email, 3, 3600, false);
+    await db
+      .prepare("DELETE FROM account_password_resets WHERE expires_at<?")
+      .bind(now())
+      .run();
+    const user = await db
+      .prepare("SELECT id,name,email FROM account_users WHERE email=?")
+      .bind(email)
+      .first();
+    if (user) {
+      const token = random(),
+        minutes = 30;
+      await db.batch([
+        db
+          .prepare("DELETE FROM account_password_resets WHERE user_id=?")
+          .bind(user.id),
+        db
+          .prepare("INSERT INTO account_password_resets VALUES(?,?,?,?)")
+          .bind(await digest(token), user.id, now() + minutes * 60, now()),
+      ]);
+      const link = new URL(r.url).origin + "/reset-password#token=" + token;
+      const sending = sendEmail(
+        env,
+        user.email,
+        passwordResetEmail(user.name, link, minutes),
+      ).catch((error) => console.error("password reset email failed", error));
+      // Send in the background so response time does not reveal whether the email exists.
+      if (ctx?.waitUntil) ctx.waitUntil(sending);
+      else await sending;
+    }
+    return json({ ok: true });
+  }
+  if (path === "/api/password/reset" && r.method === "POST") {
+    await limit(db, r, "password-reset", 60, 3600);
+    const b = await body(r);
+    if (typeof b.token !== "string" || !/^[a-f0-9]{64}$/.test(b.token))
+      fail(400, "ลิงก์ไม่ถูกต้องหรือหมดอายุแล้ว");
+    if (
+      typeof b.password !== "string" ||
+      b.password.length < 12 ||
+      b.password.length > 128
+    )
+      fail(400, "รหัสผ่านต้องมี 12–128 ตัวอักษร");
+    const tokenHash = await digest(b.token);
+    const reset = await db
+      .prepare(
+        "SELECT user_id FROM account_password_resets WHERE token_hash=? AND expires_at>?",
+      )
+      .bind(tokenHash, now())
+      .first();
+    if (!reset) fail(400, "ลิงก์ไม่ถูกต้องหรือหมดอายุแล้ว");
+    const passwordHash = await hashPassword(b.password);
+    // Claim the token atomically so it can only be used once.
+    const claimed = await db
+      .prepare(
+        "DELETE FROM account_password_resets WHERE token_hash=? AND expires_at>? RETURNING user_id",
+      )
+      .bind(tokenHash, now())
+      .all();
+    if (!claimed.results.length) fail(400, "ลิงก์ไม่ถูกต้องหรือหมดอายุแล้ว");
+    await db.batch([
+      db
+        .prepare("UPDATE account_users SET password_hash=? WHERE id=?")
+        .bind(passwordHash, reset.user_id),
+      db
+        .prepare("DELETE FROM account_password_resets WHERE user_id=?")
+        .bind(reset.user_id),
+      db
+        .prepare("DELETE FROM account_sessions WHERE user_id=?")
+        .bind(reset.user_id),
+    ]);
+    return json({ ok: true }, 200, { "Set-Cookie": sessionCookie(r, "", 0) });
+  }
   if (path === "/api/logout" && r.method === "POST") {
     const token = (r.headers.get("cookie") || "")
       .split(";")
@@ -282,7 +363,7 @@ async function api(r, env) {
   fail(404, "ไม่พบรายการที่ร้องขอ");
 }
 export default {
-  async fetch(r, env) {
+  async fetch(r, env, ctx) {
     let response;
     try {
       let decodedPath = new URL(r.url).pathname;
