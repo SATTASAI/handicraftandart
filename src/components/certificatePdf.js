@@ -191,7 +191,7 @@ function awardBadge(ctx, text, y, color) {
   ctx.textBaseline = "alphabetic";
 }
 
-function drawCertificate(ctx, cert, student, settings, img) {
+function drawCertificate(ctx, cert, student, settings, img, sigImgs = []) {
   frame(ctx);
   logo(ctx, img, 146);
   line(ctx, settings.organization, 248, 30, 600, NAVY, W - 420, 1);
@@ -217,10 +217,17 @@ function drawCertificate(ctx, cert, student, settings, img) {
   line(ctx, settings.event_line, 884, 30, 400, NAVY_SOFT);
   if (settings.issued_text) line(ctx, settings.issued_text, 930, 28, 400, NAVY_SOFT);
 
-  const signers = (settings.signers || []).filter((s) => s.name || s.position);
+  const signers = (settings.signers || []).filter((s) => s.name || s.position || s.signature);
   const slot = (W - 420) / Math.max(signers.length, 1);
   signers.forEach((s, i) => {
     const x = 210 + slot * i + slot / 2;
+    const sig = sigImgs[i];
+    if (sig) {
+      const k = Math.min(300 / sig.width, 95 / sig.height);
+      const sw = sig.width * k,
+        sh = sig.height * k;
+      ctx.drawImage(sig, x - sw / 2, 1034 - sh, sw, sh);
+    }
     ctx.strokeStyle = NAVY_SOFT;
     ctx.lineWidth = 1.5;
     ctx.setLineDash([3, 5]);
@@ -311,10 +318,13 @@ export async function downloadCertificates(certs, settings, filename) {
   canvas.height = H;
   const ctx = canvas.getContext("2d"),
     pages = [],
-    img = await loadImage(settings.logo);
+    img = await loadImage(settings.logo),
+    sigImgs = await Promise.all(
+      (settings.signers || []).filter((s) => s.name || s.position || s.signature).map((s) => loadImage(s.signature)),
+    );
   for (const cert of certs)
     for (const student of cert.students) {
-      drawCertificate(ctx, cert, student, settings, img);
+      drawCertificate(ctx, cert, student, settings, img, sigImgs);
       pages.push(await jpeg(canvas));
     }
   if (!pages.length) throw Error("ไม่มีรายชื่อนักเรียนสำหรับสร้างประกาศนียบัตร");
