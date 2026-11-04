@@ -92,13 +92,13 @@ const student = (id) => ({
   document_id: id,
 });
 
-test("uploaded PDFs match hashes; primary-only catalog has 49 general and 27 inclusive entries with traceable score criteria", async () => {
+test("uploaded PDFs match hashes; primary-only catalog has 49 general entries and no inclusive entries with traceable score criteria", async () => {
   assert.equal(catalog.sources.length, 10);
   assert.equal(
     catalog.sources.reduce((n, s) => n + s.pages, 0),
     158,
   );
-  assert.equal(catalog.sources.filter((s) => s.included).length, 9);
+  assert.equal(catalog.sources.filter((s) => s.included).length, 8);
   assert.equal(
     catalog.sources.find((s) => s.key_name === "kindergarten").included,
     false,
@@ -111,7 +111,7 @@ test("uploaded PDFs match hashes; primary-only catalog has 49 general and 27 inc
     );
     assert.equal(bytes.subarray(0, 5).toString(), "%PDF-");
   }
-  assert.equal(catalog.competitions.length, 76);
+  assert.equal(catalog.competitions.length, 49);
   assert.equal(
     catalog.competitions.filter((c) => c.category === "นาฏศิลป์").length,
     4,
@@ -121,7 +121,7 @@ test("uploaded PDFs match hashes; primary-only catalog has 49 general and 27 inc
       .rules.policy.team_variants[1].min_students,
     7,
   );
-  assert.equal(new Set(catalog.competitions.map((c) => c.id)).size, 76);
+  assert.equal(new Set(catalog.competitions.map((c) => c.id)).size, 49);
   assert.equal(
     catalog.competitions.filter((c) => c.rules.policy.division === "general")
       .length,
@@ -130,7 +130,7 @@ test("uploaded PDFs match hashes; primary-only catalog has 49 general and 27 inc
   assert.equal(
     catalog.competitions.filter((c) => c.rules.policy.division === "inclusive")
       .length,
-    27,
+    0,
   );
   const sections = new Map(catalog.sections.map((s) => [s.key, s]));
   for (const c of catalog.competitions) {
@@ -281,7 +281,7 @@ test("catalog migration preserves populated competitions, registrations, ID docu
       .prepare("SELECT * FROM event_competitions WHERE catalog_key IS NOT NULL")
       .all()
   ).results;
-  assert.equal(imported.length, 76);
+  assert.equal(imported.length, 49);
   assert(imported.every((c) => c.registration_open === 1));
   assert.equal(
     (
@@ -304,9 +304,12 @@ test("catalog migration preserves populated competitions, registrations, ID docu
     .filter((s) => s.startsWith("INSERT OR IGNORE"))
     .join("\n");
   await db.exec(seed);
+  await db.exec(
+    await readFile("migrations/0016_remove_inclusive.sql", "utf8"),
+  );
   assert.equal(
     (await db.prepare("SELECT COUNT(*) n FROM event_competitions").first()).n,
-    77,
+    50,
   );
   assert.equal(
     (
@@ -329,12 +332,12 @@ test("imported rules enforce primary grade, gender pair, film coaches/work and l
     coach = await signup("coach");
   const response = await call("/api/competitions", undefined, coach.cookie);
   assert.equal(response.status, 200);
-  assert.equal(response.body.competitions.length, 76);
+  assert.equal(response.body.competitions.length, 49);
   const find = (prefix) =>
     response.body.competitions.find((c) => c.id.startsWith(prefix));
   const mixed = find("c73-art-mixed1-"),
     film = find("c73-film-short-film-"),
-    etiquette = find("c73-inclusive-11-ID-"),
+    country = find("c73-music-country-male-"),
     chorus = find("c73-music-chorus-"),
     winds = find("c73-music-winds-");
   const doc = await upload(coach.cookie);
@@ -357,8 +360,8 @@ test("imported rules enforce primary grade, gender pair, film coaches/work and l
   assert.equal(
     (
       await send(
-        etiquette,
-        docs.map((id) => ({ ...student(id), gender: "ชาย" })),
+        country,
+        docs.slice(0, 1).map((id) => ({ ...student(id), gender: "หญิง" })),
       )
     ).status,
     400,
@@ -366,8 +369,8 @@ test("imported rules enforce primary grade, gender pair, film coaches/work and l
   assert.equal(
     (
       await send(
-        etiquette,
-        docs.map((id, i) => ({ ...student(id), gender: i ? "หญิง" : "ชาย" })),
+        country,
+        docs.slice(0, 1).map((id) => ({ ...student(id), gender: "ชาย" })),
       )
     ).status,
     201,

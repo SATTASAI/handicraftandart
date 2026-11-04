@@ -191,3 +191,42 @@ test("judge assignment, scoring, ranking, medals, results and certificates", asy
   await request("/admin/judges", { competition_id, judge_id: coachB.body.user.id, assigned: false }, admin.cookie);
   assert.equal((await request("/results/" + competition_id, undefined, coachA.cookie)).body.teams[0].score, 70);
 });
+
+test("superadmin deletes accounts and resets competition data", async (t) => {
+  const { db, request, signup, upload } = await runtime(t);
+  const admin = await signup("admin"),
+    coach = await signup("coachx", ["coach", "judge"]),
+    other = await signup("coachy");
+  const c = await request(
+    "/admin/competitions",
+    { title: "รายการลบ", grade_label: "ป.4–6", min_students: 1, max_students: 1, description: "ทดสอบ" },
+    admin.cookie,
+  );
+  const competition_id = c.body.id;
+  const reg = async (who, name) => {
+    const s = await request("/registrations", { competition_id, request_id: crypto.randomUUID(), students: [student(await upload(who.cookie), name)] }, who.cookie);
+    assert.equal(s.status, 201, JSON.stringify(s.body));
+    await request("/admin/registrations/" + s.body.registration.id + "/review", { revision: 1, status: "approved" }, admin.cookie);
+    return s.body.registration.id;
+  };
+  await reg(coach, "หนึ่ง");
+  const otherTeam = await reg(other, "สอง");
+  await request("/admin/judges", { competition_id, judge_id: coach.body.user.id, assigned: true }, admin.cookie);
+  assert.equal((await request("/judging/" + competition_id + "/scores", { registration_id: otherTeam, revision: 1, scores: [75] }, coach.cookie)).status, 200);
+  const del = (id, who) => request("/admin/users/" + id + "/delete", {}, who.cookie);
+  assert.equal((await del(other.body.user.id, coach)).status, 403);
+  assert.equal((await del(admin.body.user.id, admin)).status, 400);
+  const ok = await del(coach.body.user.id, admin);
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.equal((await db.prepare("SELECT COUNT(*) n FROM account_users WHERE id=?").bind(coach.body.user.id).first()).n, 0);
+  assert.equal((await db.prepare("SELECT COUNT(*) n FROM event_scores").first()).n, 0);
+  assert.equal((await db.prepare("SELECT COUNT(*) n FROM event_registrations").first()).n, 1);
+  assert.equal((await request("/me", undefined, coach.cookie)).body.user, null);
+  assert.equal((await request("/admin/reset-competition-data", { confirm: "x" }, admin.cookie)).status, 400);
+  assert.equal((await request("/admin/reset-competition-data", { confirm: "ล้างข้อมูล" }, other.cookie)).status, 403);
+  assert.equal((await request("/admin/reset-competition-data", { confirm: "ล้างข้อมูล" }, admin.cookie)).status, 200);
+  for (const table of ["event_registrations", "event_students", "registration_documents", "event_scores"])
+    assert.equal((await db.prepare("SELECT COUNT(*) n FROM " + table).first()).n, 0, table);
+  assert.equal((await db.prepare("SELECT COUNT(*) n FROM account_users").first()).n, 2);
+  assert.equal((await db.prepare("PRAGMA foreign_key_check").all()).results.length, 0);
+});

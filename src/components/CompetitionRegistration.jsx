@@ -1075,7 +1075,6 @@ export default function CompetitionRegistration({ user, tab, onTab }) {
               >
                 <option value="">ทั้งหมด</option>
                 <option value="general">ทั่วไป</option>
-                <option value="inclusive">เรียนรวม</option>
               </select>
             </label>
             <label className="field">
