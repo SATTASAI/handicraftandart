@@ -1,0 +1,22 @@
+{
+  "name": "ศิลปหัตถกรรมนักเรียน · ศูนย์เครือข่ายสองพี่น้อง",
+  "short_name": "ศิลปหัตถกรรม",
+  "description": "ลงทะเบียนนักเรียน ตัดสิน ผลการแข่งขัน และเกียรติบัตร",
+  "lang": "th",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f6fb",
+  "theme_color": "#1557cc",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    {
+      "src": "/icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
