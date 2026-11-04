@@ -6,19 +6,19 @@ const WORK_MAX = 1400;
 const OUT_W = 640,
   OUT_H = 220;
 
+// ใช้ FileReader → data URL เพราะ CSP ของระบบอนุญาต img-src แค่ 'self' และ data: (blob: ถูกบล็อก)
 function readImage(file) {
   return new Promise((ok, bad) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      ok(img);
+    const rd = new FileReader();
+    rd.onerror = () => bad(Error("อ่านไฟล์รูปไม่ได้"));
+    rd.onload = () => {
+      const img = new Image();
+      img.onload = () => ok(img);
+      img.onerror = () =>
+        bad(Error("เบราว์เซอร์เปิดไฟล์รูปนี้ไม่ได้ (เช่น HEIC) กรุณาใช้ไฟล์ JPG หรือ PNG"));
+      img.src = rd.result;
     };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      bad(Error("อ่านไฟล์รูปไม่ได้"));
-    };
-    img.src = url;
+    rd.readAsDataURL(file);
   });
 }
 
@@ -75,8 +75,7 @@ function otsu(values) {
 }
 
 export async function processSignature(file) {
-  if (!/^image\/(png|jpeg|webp|heic|heif)$/.test(file.type) && !/\.(png|jpe?g|webp|heic)$/i.test(file.name))
-    throw Error("กรุณาเลือกไฟล์รูปภาพ");
+  if (file.type && !file.type.startsWith("image/")) throw Error("กรุณาเลือกไฟล์รูปภาพ");
   const img = await readImage(file);
   const k = Math.min(1, WORK_MAX / Math.max(img.width, img.height));
   const w = Math.max(1, Math.round(img.width * k)),
