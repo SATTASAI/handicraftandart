@@ -753,11 +753,11 @@ function ManageCompetitions({ competitions, onChanged }) {
     </>
   );
 }
-export default function CompetitionRegistration({ user }) {
+export default function CompetitionRegistration({ user, tab, onTab }) {
   const coach = user.is_superadmin || user.roles.includes("coach"),
     reviewer = user.is_superadmin || user.is_organizer;
-  const [tab, setTab] = useState("competitions"),
-    [competitions, setCompetitions] = useState([]),
+  const setTab = onTab;
+  const [competitions, setCompetitions] = useState([]),
     [rows, setRows] = useState([]),
     [hasMore, setHasMore] = useState(false),
     [page, setPage] = useState(1),
@@ -816,37 +816,15 @@ export default function CompetitionRegistration({ user }) {
       active = false;
     };
   }, [user.id, tab, page, filter, version]);
-  const tabs = [
-    ["competitions", "รายการแข่งขัน"],
-    ...(coach ? [["mine", "รายการสมัครของฉัน"]] : []),
-    ...(reviewer ? [["review", "ตรวจเอกสาร / ยืนยัน"]] : []),
-    ...(user.is_superadmin ? [["manage", "จัดการรายการแข่งขัน"]] : []),
-    ...(user.is_superadmin ? [["judges", "มอบหมายกรรมการ"]] : []),
-    ...(user.is_superadmin || user.roles.includes("judge")
-      ? [["judging", "สำหรับกรรมการ"]]
-      : []),
-    ["results", "ผลการแข่งขัน"],
-    ...(coach ? [["certificates", "ประกาศนียบัตร"]] : []),
-  ];
+  const keepSuccess = useRef(false);
+  useEffect(() => {
+    setPage(1);
+    setForm(null);
+    if (keepSuccess.current) keepSuccess.current = false;
+    else setSuccess("");
+  }, [tab]);
   return (
     <section className="competition-workspace" aria-label="ลงทะเบียนแข่งขัน">
-      <nav className="workspace-tabs" aria-label="เมนูการแข่งขัน">
-        {tabs.map(([key, label]) => (
-          <button
-            key={key}
-            className={tab === key ? "active" : ""}
-            aria-current={tab === key ? "page" : undefined}
-            onClick={() => {
-              setTab(key);
-              setPage(1);
-              setForm(null);
-              setSuccess("");
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
       {!form && (
         <div className="workspace-refresh">
           <button className="secondary" disabled={loading} onClick={refresh}>
@@ -887,11 +865,12 @@ export default function CompetitionRegistration({ user }) {
           existing={form.existing}
           onCancel={() => setForm(null)}
           onDone={() => {
-            setSuccess("ส่งรายการแล้ว รอผู้จัดตรวจเอกสารและยืนยันการลงทะเบียน");
             setForm(null);
             setTab("mine");
             setPage(1);
             refresh();
+            keepSuccess.current = true;
+            setSuccess("ส่งรายการแล้ว รอผู้จัดตรวจเอกสารและยืนยันการลงทะเบียน");
           }}
         />
       ) : loading ? (
