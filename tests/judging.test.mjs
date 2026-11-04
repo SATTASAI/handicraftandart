@@ -168,6 +168,19 @@ test("judge assignment, scoring, ranking, medals, results and certificates", asy
   const certA = await request("/certificates", undefined, coachA.cookie);
   assert.deepEqual(certA.body.certificates.map((x) => x.registration_id), [teamA]);
   assert.equal(certA.body.certificates[0].students[0].first_name, "เอ");
+  assert.equal(certA.body.certificates[0].coach_certificate, true);
+  assert.equal(certA.body.judge_certificates.length, 0, "coach not assigned as judge");
+  // Assigned judge sees every team's students (no coach certificate) plus own judge certificate.
+  const certJ = await request("/certificates", undefined, judge.cookie);
+  assert.equal(certJ.body.certificates.length, 2);
+  assert.ok(certJ.body.certificates.every((x) => !x.coach_certificate && !x.own));
+  assert.deepEqual(certJ.body.judge_certificates.map((x) => x.judges.map((j) => j.name)), [["ครู judge1"]]);
+  // Coach who is also a judge: own team gets coach certificate, others do not.
+  const certB = await request("/certificates", undefined, coachB.cookie);
+  assert.deepEqual(certB.body.certificates.filter((x) => x.coach_certificate).map((x) => x.registration_id), [teamB]);
+  assert.equal(certB.body.judge_certificates.length, 1);
+  assert.equal((await request("/certificates", undefined, plain.cookie)).body.certificates.length, 0);
+  assert.equal((await request("/certificates", undefined, admin.cookie)).body.judge_certificates[0].judges.length, 2);
   assert.equal((await request("/certificates", undefined, admin.cookie)).body.certificates.length, 2);
   assert.equal((await request("/certificate-settings", { organization: "x" }, coachA.cookie)).status, 403);
   const saved = await request("/certificate-settings", { organization: "ศูนย์ทดสอบ", signers: [{ name: "ผู้ลงนาม", position: "ประธาน" }] }, admin.cookie);

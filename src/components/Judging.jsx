@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { processLogo, processSignature } from "./signatureImage.js";
-import { downloadCertificates } from "./certificatePdf";
+import { downloadCertificates, certificateCount } from "./certificatePdf";
 
 function useLoad(path, deps) {
   const [state, setState] = useState({ loading: true, error: "", data: null });
@@ -508,26 +508,34 @@ export function CertificatesPanel({ user }) {
   const q = useLoad("/certificates", []);
   const [busy, setBusy] = useState(""),
     [error, setError] = useState("");
-  async function download(certs, name) {
+  async function download(certs, name, kind = "student") {
     setBusy(name);
     setError("");
     try {
-      await downloadCertificates(certs, q.data.settings, name + ".pdf");
+      await downloadCertificates(certs, q.data.settings, name + ".pdf", kind);
     } catch (e) {
       setError(e.message || "สร้าง PDF ไม่สำเร็จ");
     } finally {
       setBusy("");
     }
   }
+  const btn = (certs, name, kind, label, cls = "primary") => (
+    <button className={cls} disabled={!!busy} onClick={() => download(certs, name, kind)}>
+      {busy === name ? "กำลังสร้าง PDF…" : label}
+    </button>
+  );
+  const certs = q.data?.certificates || [],
+    judgeCerts = q.data?.judge_certificates || [],
+    coachCerts = certs.filter((c) => c.coach_certificate);
   return (
     <>
       <div className="section-heading">
         <h2>ประกาศนียบัตร</h2>
-        {q.data?.certificates.length > 1 && (
-          <button className="secondary" disabled={!!busy} onClick={() => download(q.data.certificates, "ประกาศนียบัตรทั้งหมด")}>
-            ดาวน์โหลดทั้งหมด (PDF)
-          </button>
-        )}
+        <div className="cert-actions">
+          {certs.length > 1 && btn(certs, "ประกาศนียบัตรนักเรียนทั้งหมด", "student", "นักเรียนทั้งหมด (PDF)", "secondary")}
+          {coachCerts.length > 1 && btn(coachCerts, "ประกาศนียบัตรครูผู้ฝึกซ้อมทั้งหมด", "coach", "ครูผู้ฝึกซ้อมทั้งหมด (PDF)", "secondary")}
+          {judgeCerts.length > 1 && btn(judgeCerts, "ประกาศนียบัตรกรรมการทั้งหมด", "judge", "กรรมการทั้งหมด (PDF)", "secondary")}
+        </div>
       </div>
       <Status {...q} />
       {error && <p className="error" role="alert">{error}</p>}
@@ -536,18 +544,37 @@ export function CertificatesPanel({ user }) {
       )}
       {q.data && (
         <>
-          {!q.data.certificates.length && (
+          {!certs.length && !judgeCerts.length && (
             <section className="panel">
-              <p>ยังไม่มีประกาศนียบัตร ระบบจะสร้างให้เมื่อรายการที่ลงทะเบียนไว้ประกาศผลแล้ว</p>
+              <p>ยังไม่มีประกาศนียบัตร ระบบจะสร้างให้เมื่อรายการที่ลงทะเบียนหรือได้รับมอบหมายเป็นกรรมการประกาศผลแล้ว</p>
             </section>
           )}
-          {q.data.certificates.map((c) => (
-            <section className="panel registration-card" key={c.registration_id}>
+          {judgeCerts.length > 0 && <h3>กรรมการตัดสิน</h3>}
+          {judgeCerts.map((c) => (
+            <section className="panel registration-card" key={"j" + c.competition.id}>
               <div className="section-heading">
                 <div>
                   <span className="eyebrow">{c.competition.category}</span>
                   <h3>{c.competition.title}</h3>
                   <span className="muted">{c.competition.grade_label}</span>
+                </div>
+                <span className="badge medal-none">กรรมการ</span>
+              </div>
+              <p>{c.judges.map((j) => j.name).join(", ")}</p>
+              {btn([c], "ประกาศนียบัตรกรรมการ-" + c.competition.title, "judge", `ดาวน์โหลดใบกรรมการ (${c.judges.length} ใบ)`)}
+            </section>
+          ))}
+          {certs.length > 0 && judgeCerts.length > 0 && <h3>ทีมที่ประกาศผลแล้ว</h3>}
+          {certs.map((c) => (
+            <section className="panel registration-card" key={c.registration_id}>
+              <div className="section-heading">
+                <div>
+                  <span className="eyebrow">{c.competition.category}</span>
+                  <h3>{c.competition.title}</h3>
+                  <span className="muted">
+                    {c.competition.grade_label}
+                    {c.school ? " · " + c.school : ""}
+                  </span>
                 </div>
                 <span className={"badge " + medalClass(c.medal)}>
                   {c.medal}
@@ -557,13 +584,11 @@ export function CertificatesPanel({ user }) {
               <p>
                 {names(c.students)} <span className="muted">· คะแนน {c.score}</span>
               </p>
-              <button
-                className="primary"
-                disabled={!!busy}
-                onClick={() => download([c], "ประกาศนียบัตร-" + c.competition.title)}
-              >
-                {busy === "ประกาศนียบัตร-" + c.competition.title ? "กำลังสร้าง PDF…" : `ดาวน์โหลด PDF (${c.students.length} ใบ)`}
-              </button>
+              <div className="cert-actions">
+                {btn([c], "ประกาศนียบัตร-" + c.competition.title + "-" + c.registration_id.slice(0, 6), "student", `ใบนักเรียน (${c.students.length} ใบ)`)}
+                {c.coach_certificate &&
+                  btn([c], "ประกาศนียบัตรครู-" + c.competition.title + "-" + c.registration_id.slice(0, 6), "coach", `ใบครูผู้ฝึกซ้อม (${certificateCount(c, "coach")} ใบ)`, "secondary")}
+              </div>
             </section>
           ))}
           {q.data.pending.length > 0 && (
