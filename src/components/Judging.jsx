@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
+import { processSignature } from "./signatureImage.js";
 import { downloadCertificates } from "./certificatePdf";
 
 function useLoad(path, deps) {
@@ -383,7 +384,7 @@ export function ResultsPanel({ reviewer }) {
 function CertificateSettings({ settings, onSaved }) {
   const [s, setS] = useState(() => ({
     ...settings,
-    signers: [...settings.signers, { name: "", position: "" }, { name: "", position: "" }, { name: "", position: "" }].slice(0, 3),
+    signers: [...settings.signers, { name: "", position: "", signature: "" }, { name: "", position: "", signature: "" }, { name: "", position: "", signature: "" }].slice(0, 3),
   }));
   const [busy, setBusy] = useState(false),
     [msg, setMsg] = useState("");
@@ -457,6 +458,38 @@ function CertificateSettings({ settings, onSaved }) {
                 onChange={(e) => set("signers", s.signers.map((x, k) => (k === i ? { ...x, position: e.target.value } : x)))}
               />
             </label>
+            <div className="field">
+              ลายเซ็นอิเล็กทรอนิกส์ (ถ่ายรูปลายเซ็นบนกระดาษขาว ระบบจะลบพื้นหลังให้)
+              <input
+                type="file"
+                accept="image/*"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!f) return;
+                  setMsg("กำลังประมวลผลลายเซ็น…");
+                  try {
+                    const signature = await processSignature(f);
+                    setS((v) => ({ ...v, signers: v.signers.map((x, k) => (k === i ? { ...x, signature } : x)) }));
+                    setMsg("ลบพื้นหลังลายเซ็นแล้ว กดบันทึกเพื่อใช้งาน");
+                  } catch (err) {
+                    setMsg(err.message);
+                  }
+                }}
+              />
+              {g.signature && (
+                <span>
+                  <img
+                    src={g.signature}
+                    alt={`ลายเซ็นผู้ลงนาม ${i + 1}`}
+                    style={{ height: 64, maxWidth: 240, objectFit: "contain", background: "#fff", border: "1px dashed #c8d3e6", verticalAlign: "middle" }}
+                  />{" "}
+                  <button type="button" onClick={() => set("signers", s.signers.map((x, k) => (k === i ? { ...x, signature: "" } : x)))}>
+                    ลบลายเซ็น
+                  </button>
+                </span>
+              )}
+            </div>
           </div>
         ))}
         <div className="form-actions">

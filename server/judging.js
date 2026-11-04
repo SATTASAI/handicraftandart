@@ -196,7 +196,7 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
   }
   if (path === "/api/admin/judges" && method === "POST") {
     if (!superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
-    const b = await body(r, 400000);
+    const b = await body(r, 1000000);
     const logo = typeof b.logo === "string" ? b.logo : "";
     if (logo && (logo.length > 300000 || !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(logo)))
       fail(400, "โลโก้ต้องเป็นไฟล์ PNG/JPEG ขนาดไม่เกิน 200 KB");
@@ -358,7 +358,7 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
     return json({ settings: await certificateSettings(db) });
   if (path === "/api/certificate-settings" && method === "POST") {
     if (!superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
-    const b = await body(r, 400000);
+    const b = await body(r, 1000000);
     const logo = typeof b.logo === "string" ? b.logo : "";
     if (logo && (logo.length > 300000 || !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(logo)))
       fail(400, "โลโก้ต้องเป็นไฟล์ PNG/JPEG ขนาดไม่เกิน 200 KB");
@@ -370,8 +370,13 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
       issued_text: s(b.issued_text, 100),
       logo,
       signers: signers
-        .map((x) => ({ name: s(x?.name, 100), position: s(x?.position, 120) }))
-        .filter((x) => x.name || x.position),
+        .map((x) => {
+          const signature = typeof x?.signature === "string" ? x.signature : "";
+          if (signature && (signature.length > 200000 || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(signature)))
+            fail(400, "ไฟล์ลายเซ็นไม่ถูกต้องหรือใหญ่เกินไป");
+          return { name: s(x?.name, 100), position: s(x?.position, 120), signature };
+        })
+        .filter((x) => x.name || x.position || x.signature),
     };
     await db
       .prepare(
