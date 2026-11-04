@@ -709,7 +709,7 @@ function UsersPanel() {
                   </label>
                   <button
                     type="button"
-                    className="danger-button"
+                    className="danger-button row-action"
                     disabled={organizerBusy}
                     onClick={() => deleteUser(u)}
                     aria-label={"ลบบัญชี " + u.name}

@@ -819,6 +819,14 @@ button.list-row > .icon:last-child {
   color: var(--ink-soft);
   overflow-wrap: anywhere;
 }
+.danger-button.row-action {
+  width: auto;
+  flex-shrink: 0;
+  margin-top: 0;
+  min-height: 36px;
+  padding: 6px 14px;
+  font-size: 13px;
+}
 .switch {
   display: inline-flex;
   align-items: center;
