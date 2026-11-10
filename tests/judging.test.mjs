@@ -246,3 +246,50 @@ test("superadmin can close and reopen the system", async (t) => {
   assert.equal((await request("/admin/system", { enabled: true }, admin.cookie)).status, 200);
   assert.equal((await request("/competitions", undefined, coach.cookie)).status, 200);
 });
+
+test("a new round rebuilds competitions from the retained catalog and preserves accounts", async (t) => {
+  const { db, request, signup, upload } = await runtime(t);
+  const admin = await signup("roundadmin");
+  const coach = await signup("roundcoach", ["coach", "judge"]);
+  const { id: competition_id } = (await request("/admin/competitions", {
+    title: "รายการรอบเดิม", grade_label: "ป.4–6", min_students: 1, max_students: 1,
+  }, admin.cookie)).body;
+  const registration = await request("/registrations", {
+    competition_id, request_id: crypto.randomUUID(),
+    students: [student(await upload(coach.cookie), "ทดสอบ")],
+  }, coach.cookie);
+  assert.equal(registration.status, 201, JSON.stringify(registration.body));
+  await request(`/admin/registrations/${registration.body.registration.id}/review`, { revision: 1, status: "approved" }, admin.cookie);
+  await request("/admin/judges", { competition_id, judge_id: coach.body.user.id, assigned: true }, admin.cookie);
+
+  const portal = await request("/portal");
+  assert.equal(portal.status, 200);
+  assert.equal(portal.body.stats.students, 1);
+  assert.equal(portal.body.stats.schools, 1);
+  assert.equal(portal.body.stats.judges, 1);
+  assert.deepEqual(Object.keys(portal.body.stats).sort(), ["activities", "judges", "open_activities", "schools", "students", "teams"]);
+  const catalog = (await db.prepare("SELECT id,title,rules_json FROM competition_catalog ORDER BY id").all()).results;
+  assert.ok(catalog.length > 0);
+  await db.prepare("UPDATE event_competitions SET venue='สนามเดิม',starts_at='2026-02-10',registration_open=0 WHERE catalog_key IS NOT NULL").run();
+  await db.exec("INSERT INTO app_settings(key,value,updated_at) VALUES('certificate','{}',1),('drive_folder:root','\"root\"',1)");
+  const newRound = (who, confirm = "เริ่มรอบใหม่") => request("/admin/start-new-round", { confirm }, who.cookie);
+  assert.equal((await newRound(coach)).status, 403);
+  assert.equal((await newRound(admin, "ไม่ถูกต้อง")).status, 400);
+  assert.equal((await newRound(admin)).status, 409);
+  await request("/admin/system", { enabled: false }, admin.cookie);
+  assert.deepEqual((await request("/portal")).body, { system_closed: true, stats: null });
+
+  const reset = await newRound(admin);
+  assert.equal(reset.status, 200, JSON.stringify(reset.body));
+  assert.deepEqual(reset.body, { ok: true, remaining: 0 });
+  for (const table of ["event_registrations", "event_students", "registration_documents", "event_scores", "event_judges", "event_registration_reviews", "certificate_files"])
+    assert.equal((await db.prepare(`SELECT COUNT(*) n FROM ${table}`).first()).n, 0, table);
+  assert.deepEqual((await db.prepare("SELECT id,title,rules_json FROM event_competitions ORDER BY id").all()).results, catalog);
+  assert.deepEqual((await db.prepare("SELECT id,title,rules_json FROM competition_catalog ORDER BY id").all()).results, catalog);
+  assert.equal((await db.prepare("SELECT COUNT(*) n FROM event_competitions WHERE venue<>'' OR starts_at<>''").first()).n, 0);
+  assert.deepEqual((await db.prepare("SELECT key FROM app_settings ORDER BY key").all()).results.map(row => row.key), ["drive_folder:root", "system_enabled"]);
+  assert.equal((await request("/me", undefined, coach.cookie)).body.user.id, coach.body.user.id);
+  await request("/admin/system", { enabled: true }, admin.cookie);
+  assert.equal((await request("/portal")).body.stats.students, 0);
+  assert.equal((await db.prepare("PRAGMA foreign_key_check").all()).results.length, 0);
+});

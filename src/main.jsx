@@ -1,5 +1,6 @@
 import CompetitionRegistration from "./components/CompetitionRegistration";
 import Icon from "./components/Icon";
+import CompetitionPortal, { networkName, PortalHeader } from "./components/CompetitionPortal";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { api } from "./api";
@@ -8,6 +9,10 @@ const labels = { coach: "ผู้ฝึกซ้อม", judge: "กรรม�
 function go(path) {
   history.pushState({}, "", path);
   window.dispatchEvent(new PopStateEvent("popstate"));
+}
+function afterAuth() {
+  return ["#competitions", "#results", "#certificates"].includes(location.hash)
+    ? `/${location.hash}` : "/";
 }
 function Link({ to, children, ...props }) {
   return (
@@ -92,7 +97,7 @@ function Auth({ signup, onUser }) {
     try {
       const result = await api(signup ? "/signup" : "/login", data);
       onUser(result.user);
-      go("/");
+      go(afterAuth());
     } catch (e) {
       setError(e.message);
     } finally {
@@ -656,15 +661,17 @@ function UsersPanel() {
   }
   async function resetData() {
     const typed = window.prompt(
-      "ล้างข้อมูลการแข่งขันทั้งหมด: ทีมที่สมัคร เอกสาร คะแนน และผลตัดสินจะถูกลบถาวร (บัญชีผู้ใช้และรายการแข่งขันยังอยู่)\nพิมพ์คำว่า ล้างข้อมูล เพื่อยืนยัน",
+      "เริ่มการแข่งขันรอบใหม่: ลบข้อมูลรอบเดิมถาวรและสร้างรายการใหม่จากเกณฑ์ที่เก็บไว้ บัญชีผู้ใช้และเกณฑ์การแข่งขันยังอยู่\nพิมพ์คำว่า เริ่มรอบใหม่ เพื่อยืนยัน",
     );
     if (typed === null) return;
     setOrganizerBusy(true);
     setError("");
     setNotice("");
     try {
-      await api("/admin/reset-competition-data", { confirm: typed.trim() });
-      setNotice("ล้างข้อมูลการแข่งขันแล้ว");
+      const result = await api("/admin/start-new-round", { confirm: typed.trim() });
+      setNotice(result.remaining
+        ? `เหลือไฟล์ใน Google Drive ${result.remaining} ไฟล์ กดเริ่มรอบใหม่อีกครั้งเพื่อดำเนินการต่อ`
+        : "เริ่มรอบใหม่แล้ว บัญชีและเกณฑ์การแข่งขันยังคงอยู่");
     } catch (e) {
       setError(e.message);
     } finally {
@@ -764,20 +771,20 @@ function UsersPanel() {
         {systemClosed ? "เปิดใช้งานระบบ" : "ปิดใช้งานระบบ"}
       </button>
       <div className="section-heading">
-        <h2>ล้างข้อมูล</h2>
+        <h2>เริ่มการแข่งขันรอบใหม่</h2>
       </div>
       <p className="muted">
-        ลบทีมที่สมัคร เอกสาร คะแนน และผลตัดสินทั้งหมด
-        บัญชีผู้ใช้และรายการแข่งขันยังคงอยู่
+        ปิดระบบก่อนเริ่มรอบใหม่ ระบบจะลบทีม เอกสาร คะแนน ผลตัดสิน การมอบหมายกรรมการ
+        การตั้งค่าเกียรติบัตร และรายการแข่งขันเดิม แล้วสร้างรายการใหม่จากเกณฑ์เดิม บัญชีผู้ใช้และเกณฑ์การแข่งขันยังอยู่
       </p>
       {notice && <p role="status">{notice}</p>}
       <button
         type="button"
         className="danger-button"
-        disabled={organizerBusy}
+        disabled={organizerBusy || systemClosed !== true}
         onClick={resetData}
       >
-        ล้างข้อมูลการแข่งขัน
+        เริ่มรอบใหม่
       </button>
     </section>
   );
@@ -841,66 +848,10 @@ function InstallCard() {
   );
 }
 function Home({ user, sections, onTab }) {
-  const r = rolesOf(user);
-  const tiles = sections.filter((s) => s.hint);
   return (
-    <div className="home">
-      <section className="hello-card">
-        <p className="hello-school">{user.school}</p>
-        <h1>สวัสดี คุณ{user.name}</h1>
-        <div className="badges">
-          {r.admin && <span className="badge super">superadmin</span>}
-          {user.roles.map((role) => (
-            <span className="badge" key={role}>
-              {labels[role]}
-            </span>
-          ))}
-        </div>
-        {r.coach && (
-          <button className="primary" onClick={() => onTab("competitions")}>
-            ลงทะเบียนนักเรียน
-          </button>
-        )}
-      </section>
+    <CompetitionPortal user={user} sections={sections} onTab={onTab}>
       <InstallCard />
-      <h2 className="group-title">เมนูของคุณ</h2>
-      <div className="tile-grid">
-        {tiles
-          .filter((s) => !s.admin)
-          .map((s) => (
-            <button className="tile" key={s.key} onClick={() => onTab(s.key)}>
-              <span className="tile-icon" aria-hidden="true">
-                <Icon name={s.icon} />
-              </span>
-              <strong>{s.label}</strong>
-              <small>{s.hint}</small>
-            </button>
-          ))}
-      </div>
-      {r.admin && (
-        <>
-          <h2 className="group-title">ผู้ดูแลระบบ</h2>
-          <ul className="list-group">
-            {tiles
-              .filter((s) => s.admin)
-              .map((s) => (
-                <li key={s.key}>
-                  <button className="list-row" onClick={() => onTab(s.key)}>
-                    <span className="tile-icon" aria-hidden="true">
-                      <Icon name={s.icon} />
-                    </span>
-                    <span className="list-main">
-                      <strong>{s.label}</strong>
-                      <small>{s.hint}</small>
-                    </span>
-                    <Icon name="chevron" size={18} />
-                  </button>
-                </li>
-              ))}
-          </ul>
-        </>
-      )}
-    </div>
+    </CompetitionPortal>
   );
 }
 function Account({ user, onLogout, busy }) {
@@ -1004,9 +955,10 @@ function Shell({ user, onLogout, busy }) {
   );
   const userSections = sections.filter((s) => !s.admin && s.key !== "account");
   const adminSections = sections.filter((s) => s.admin);
+  const portalHome = current.key === "home";
   return (
-    <div className="app-shell">
-      <aside className="sidebar" aria-label="เมนูหลัก">
+    <div className={portalHome ? "app-shell portal-shell" : "app-shell"}>
+      {!portalHome && <aside className="sidebar" aria-label="เมนูหลัก">
         <div className="sidebar-brand">
           <span className="brand-mark" aria-hidden="true">
             ศ
@@ -1038,9 +990,9 @@ function Shell({ user, onLogout, busy }) {
             <small>บัญชีของฉัน</small>
           </span>
         </a>
-      </aside>
+      </aside>}
       <div className="app-main">
-        <header className="app-bar">
+        {portalHome ? <PortalHeader user={user} onTab={navigate} /> : <header className="app-bar">
           <span className="brand-mark" aria-hidden="true">
             ศ
           </span>
@@ -1057,8 +1009,8 @@ function Shell({ user, onLogout, busy }) {
               {user.name.trim().charAt(0)}
             </span>
           </button>
-        </header>
-        <main id="main" tabIndex={-1} className="screen">
+        </header>}
+        <main id="main" tabIndex={-1} className={portalHome ? "portal-public" : "screen"}>
           {current.key === "home" ? (
             <Home user={user} sections={sections} onTab={navigate} />
           ) : current.key === "account" ? (
@@ -1162,11 +1114,11 @@ function App() {
       "/forgot-password",
       "/reset-password",
     ];
-    if (user && publicPaths.includes(path)) go("/");
-    if (!user && !publicPaths.includes(path)) go("/login");
+    if (user && publicPaths.includes(path)) go(afterAuth());
+    if (!user && path !== "/" && !publicPaths.includes(path)) go("/login");
     if (!user)
       document.title =
-        (path === "/signup" ? "สมัครบัญชี" : "เข้าสู่ระบบ") + " · ศิลปหัตถกรรม";
+        (path === "/" ? networkName : path === "/signup" ? "สมัครบัญชี" : "เข้าสู่ระบบ") + " · ศิลปหัตถกรรม";
   }, [path, user, ready, error]);
   async function logout() {
     if (busy) return;
@@ -1201,8 +1153,19 @@ function App() {
         <Shell user={user} onLogout={logout} busy={busy} />
       </>
     );
+  if (path === "/" && !user)
+    return (
+      <>
+        <a className="skip" href="#main">ข้ามไปเนื้อหา</a>
+        <PortalHeader />
+        <main id="main" className="portal-public"><CompetitionPortal /></main>
+        <footer className="portal-footer">{networkName}</footer>
+      </>
+    );
   return (
-    <main id="main" className="public-screen">
+    <>
+      <PortalHeader />
+      <main id="main" className="public-screen">
       {!ready ? (
         <div className="splash" role="status">
           <span className="brand-mark" aria-hidden="true">
@@ -1224,7 +1187,8 @@ function App() {
       ) : (
         <Auth key={path} signup={path === "/signup"} onUser={setUser} />
       )}
-    </main>
+      </main>
+    </>
   );
 }
 createRoot(document.getElementById("root")).render(<App />);

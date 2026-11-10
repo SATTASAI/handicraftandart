@@ -1,6 +1,7 @@
 import { registrationsApi } from "./registrations.js";
 import { judgingApi } from "./judging.js";
 import { driveEnabled, deleteFiles } from "./drive.js";
+import { activationSql } from "./catalog.js";
 import { sendEmail, passwordResetEmail } from "./mail.js";
 import {
   now,
@@ -130,6 +131,19 @@ async function api(r, env, ctx) {
       user: publicUser(await currentUser(r, db)),
       system_closed: systemClosed,
     });
+  if (path === "/api/portal" && r.method === "GET") {
+    if (systemClosed) return json({ system_closed: true, stats: null });
+    const stats = await db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM event_competitions) AS activities,
+        (SELECT COUNT(*) FROM event_competitions WHERE registration_open=1) AS open_activities,
+        (SELECT COUNT(*) FROM event_registrations WHERE status='approved') AS teams,
+        (SELECT COUNT(*) FROM event_students s JOIN event_registrations r ON r.id=s.registration_id WHERE r.status='approved') AS students,
+        (SELECT COUNT(DISTINCT s.school) FROM event_students s JOIN event_registrations r ON r.id=s.registration_id WHERE r.status='approved') AS schools,
+        (SELECT COUNT(DISTINCT judge_id) FROM event_judges) AS judges
+    `).first();
+    return json({ system_closed: false, stats });
+  }
   if (
     systemClosed &&
     !["/api/login", "/api/logout"].includes(path) &&
@@ -143,6 +157,8 @@ async function api(r, env, ctx) {
     if (!user.is_superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
     const b = await body(r);
     if (typeof b.enabled !== "boolean") fail(400, "ข้อมูลไม่ถูกต้อง");
+    if (b.enabled && await db.prepare("SELECT 1 FROM app_settings WHERE key GLOB 'round_reset_file:*' LIMIT 1").first())
+      fail(409, "กรุณาดำเนินการเริ่มรอบใหม่ให้เสร็จก่อนเปิดระบบ");
     await db
       .prepare(
         "INSERT INTO app_settings(key,value,updated_by,updated_at) VALUES('system_enabled',?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
@@ -393,6 +409,43 @@ async function api(r, env, ctx) {
           .all()
       ).results.map(publicUser),
     });
+  }
+  if (path === "/api/admin/start-new-round" && r.method === "POST") {
+    const user = await currentUser(r, db);
+    if (!user) fail(401, "กรุณาเข้าสู่ระบบ");
+    if (!user.is_superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
+    const b = await body(r);
+    if (b.confirm !== "เริ่มรอบใหม่") fail(400, "กรุณาพิมพ์คำยืนยันให้ถูกต้อง");
+    if (!systemClosed) fail(409, "กรุณาปิดระบบก่อนเริ่มการแข่งขันรอบใหม่");
+    const pending = "key GLOB 'round_reset_file:*'";
+    const driveRefs = `SELECT drive_file_id AS id FROM registration_documents WHERE drive_file_id IS NOT NULL
+      UNION SELECT drive_file_id FROM certificate_files`;
+    if (!driveEnabled(env) && await db.prepare(`SELECT 1 FROM (${driveRefs}) UNION ALL SELECT 1 FROM app_settings WHERE ${pending} LIMIT 1`).first())
+      fail(409, "ต้องเชื่อมต่อ Google Drive ก่อนจึงจะลบเอกสารเดิมได้");
+    if (!(await db.prepare(`SELECT 1 FROM app_settings WHERE ${pending} LIMIT 1`).first())) {
+      await db.batch([
+        `INSERT OR IGNORE INTO app_settings(key,value,updated_at)
+         SELECT 'round_reset_file:' || id,json_quote(id),unixepoch() FROM (${driveRefs})`,
+        "DELETE FROM certificate_files",
+        "DELETE FROM event_scores",
+        "DELETE FROM event_registration_reviews",
+        "DELETE FROM event_students",
+        "DELETE FROM event_registrations",
+        "DELETE FROM registration_documents",
+        "DELETE FROM event_judges",
+        "DELETE FROM event_competitions",
+        `DELETE FROM app_settings WHERE key<>'system_enabled' AND key NOT GLOB 'drive_folder:*' AND NOT (${pending})`,
+        activationSql,
+      ].map(sql => db.prepare(sql)));
+    }
+    const files = (await db.prepare(`SELECT key,value FROM app_settings WHERE ${pending} ORDER BY updated_at,key LIMIT 20`).all()).results;
+    if (files.length) {
+      const failed = new Set(await deleteFiles(env, files.map(file => JSON.parse(file.value))));
+      const deleted = files.filter(file => !failed.has(JSON.parse(file.value)));
+      if (deleted.length) await db.batch(deleted.map(file => db.prepare("DELETE FROM app_settings WHERE key=?").bind(file.key)));
+    }
+    const { remaining } = await db.prepare(`SELECT COUNT(*) AS remaining FROM app_settings WHERE ${pending}`).first();
+    return json({ ok: true, remaining });
   }
   if (path === "/api/admin/reset-competition-data" && r.method === "POST") {
     const user = await currentUser(r, db);
