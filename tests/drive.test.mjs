@@ -59,7 +59,7 @@ function fakeGoogle() {
 async function runtime(t, google) {
   const mf = new Miniflare(
     convertV4MiniflareOptions({
-      modules: ["index.js", "security.js", "registrations.js", "catalog.js", "judging.js", "mail.js", "drive.js"].map(
+      modules: ["index.js", "security.js", "registrations.js", "catalog.js", "judging.js", "mail.js", "drive.js", "admin.js"].map(
         (f) => ({ type: "ESModule", path: "server/" + f }),
       ),
       compatibilityDate: "2026-11-02",

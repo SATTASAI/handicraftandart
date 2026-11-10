@@ -15,6 +15,7 @@ export function devApi() {
             { type: "ESModule", path: "server/mail.js" },
             { type: "ESModule", path: "server/judging.js" },
             { type: "ESModule", path: "server/drive.js" },
+            { type: "ESModule", path: "server/admin.js" },
           ],
           compatibilityDate: "2026-11-02",
           d1Databases: ["DB"],

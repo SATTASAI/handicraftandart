@@ -312,8 +312,8 @@ export function ResultsPanel({ reviewer }) {
               {detail.data.competition.grade_label} · กรรมการ {detail.data.judges.length} ท่าน ·
               คะแนนเฉลี่ยจากกรรมการ (เต็ม {detail.data.max_total})
             </p>
-            {!detail.data.complete && (
-              <p className="notice">ยังให้คะแนนไม่ครบ ผลนี้เห็นเฉพาะผู้จัด/superadmin</p>
+            {!detail.data.published && (
+              <p className="notice">{detail.data.complete ? "ระงับประกาศผลอยู่" : "ยังให้คะแนนไม่ครบ"} · ผลนี้เห็นเฉพาะผู้จัด/Superadmin</p>
             )}
             <div className="table-scroll">
               <table>
@@ -368,8 +368,8 @@ export function ResultsPanel({ reviewer }) {
                 <span className="eyebrow">{c.category}</span>
                 <strong>{c.title}</strong>
                 <span className="muted">{c.grade_label} · {c.teams} ทีม</span>
-                <span className={"badge " + (c.complete ? "status-approved" : "status-pending")}>
-                  {c.complete ? "ประกาศผลแล้ว" : `กำลังตัดสิน ${c.scored}/${c.teams}`}
+                <span className={"badge " + (c.published ? "status-approved" : "status-pending")}>
+                  {c.published ? "ประกาศผลแล้ว" : c.complete ? "ระงับประกาศผล" : `กำลังตัดสิน ${c.scored}/${c.teams}`}
                 </span>
               </button>
             ))}

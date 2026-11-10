@@ -1,3 +1,4 @@
+import { AccountEditor, AdminOverview, confirmDelete } from "./components/AdminConsole";
 import CompetitionRegistration from "./components/CompetitionRegistration";
 import Icon from "./components/Icon";
 import React, { useEffect, useRef, useState } from "react";
@@ -475,6 +476,24 @@ const sectionList = [
     can: (r) => r.coach || r.judge,
   },
   {
+    key: "admin",
+    label: "ศูนย์จัดการหลังบ้าน",
+    short: "หลังบ้าน",
+    icon: "settings",
+    hint: "ภาพรวมและเครื่องมือของ superadmin",
+    can: (r) => r.admin,
+    admin: true,
+  },
+  {
+    key: "scoring",
+    label: "จัดการคะแนนและผล",
+    short: "จัดการคะแนน",
+    icon: "star",
+    hint: "แก้คะแนนและควบคุมการประกาศผล",
+    can: (r) => r.admin,
+    admin: true,
+  },
+  {
     key: "manage",
     label: "จัดการรายการแข่งขัน",
     short: "จัดการรายการ",
@@ -510,6 +529,7 @@ const sectionList = [
   },
 ];
 const workspaceTabs = new Set([
+  "scoring",
   "competitions",
   "mine",
   "review",
@@ -587,6 +607,7 @@ function StoragePanel() {
   );
 }
 function UsersPanel() {
+  const [editing, setEditing] = useState(null);
   const [users, setUsers] = useState([]),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
@@ -644,18 +665,15 @@ function UsersPanel() {
     }
   }
   async function deleteUser(u) {
-    if (
-      !window.confirm(
-        "ลบบัญชี " +
-          u.name +
-          " ถาวร?\nทีมที่บัญชีนี้สมัคร เอกสาร และคะแนนที่บัญชีนี้ให้จะถูกลบด้วย",
-      )
-    )
-      return;
+    const confirm = confirmDelete(
+      "ลบบัญชี " + u.name + " พร้อมทีมที่บัญชีนี้สมัคร เอกสาร เกียรติบัตร และคะแนนที่บัญชีนี้ให้",
+    );
+    if (confirm === undefined) return;
     setOrganizerBusy(true);
     setError("");
     try {
-      await api("/admin/users/" + u.id + "/delete", {});
+      const result = await api("/admin/users/" + u.id + "/delete", { confirm });
+      setNotice(result.remaining ? `ลบบัญชีแล้ว มีไฟล์ Drive รอลบอีก ${result.remaining} ไฟล์` : "ลบบัญชีแล้ว");
       setUsers((previous) => previous.filter((x) => x.id !== u.id));
     } catch (e) {
       setError(e.message);
@@ -709,6 +727,17 @@ function UsersPanel() {
           {error}
         </p>
       )}
+      <div className="form-actions">
+        <button type="button" className="secondary" onClick={() => setEditing("new")}>เพิ่มบัญชี</button>
+      </div>
+      {editing && <AccountEditor key={editing.id || "new"} account={editing === "new" ? null : editing}
+        onCancel={() => setEditing(null)}
+        onSaved={(account) => {
+          setUsers(rows => editing === "new" ? [...rows, account] :
+            rows.map(row => row.id === account.id ? account : row));
+          setEditing(null);
+          setNotice("บันทึกบัญชีแล้ว");
+        }} />}
       {loading ? (
         <p role="status">กำลังโหลด…</p>
       ) : (
@@ -728,6 +757,8 @@ function UsersPanel() {
                   {u.roles.map((r) => labels[r]).join(" / ")}
                 </small>
               </span>
+              <button type="button" className="secondary row-action" disabled={organizerBusy}
+                onClick={() => setEditing(u)} aria-label={"แก้ไขบัญชี " + u.name}>แก้ไข</button>
               {u.is_superadmin ? (
                 <span className="badge super">ทุกสิทธิ์</span>
               ) : (
@@ -1078,6 +1109,8 @@ function Shell({ user, onLogout, busy }) {
             <Home user={user} sections={sections} onTab={navigate} />
           ) : current.key === "account" ? (
             <Account user={user} onLogout={onLogout} busy={busy} />
+          ) : current.key === "admin" ? (
+            <AdminOverview onTab={navigate} />
           ) : current.key === "users" ? (
             <>
               <UsersPanel />

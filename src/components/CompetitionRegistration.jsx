@@ -1,3 +1,4 @@
+import { CompetitionEditor, ScoringAdmin, confirmDelete } from "./AdminConsole";
 import CompetitionRules, { studentCount } from "./CompetitionRules";
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../api";
@@ -231,6 +232,8 @@ function RegistrationForm({
   competition,
   user,
   existing,
+  adminEditing,
+  adminOwner,
   imported,
   onDone,
   onCancel,
@@ -267,7 +270,7 @@ function RegistrationForm({
             ),
           ]
         : Array.from({ length: rules.coach_limits?.min || 1 }, (_, i) => ({
-          name: i === 0 ? user.name : "",
+          name: i === 0 ? adminOwner?.name || user.name : "",
         })),
   );
   const [workUrl, setWorkUrl] = useState(
@@ -279,7 +282,7 @@ function RegistrationForm({
     last_name: "",
     grade: "",
     gender: "",
-    school: user.school,
+    school: existing?.coach_school || adminOwner?.school || user.school,
     document_id: "",
   });
   const fromImport = () => {
@@ -326,10 +329,18 @@ function RegistrationForm({
       setError("แนบภาพบัตรประชาชนของนักเรียนทุกคนก่อนส่ง");
       return;
     }
+    const confirm = adminEditing ? window.prompt(
+      "บันทึกการแก้ไขใบสมัครนี้ ภาพบัตรที่ถูกแทนที่และคะแนนเดิมของทีมจะถูกลบ ใบสมัครจะกลับไปรอตรวจ\nพิมพ์ ยืนยันแก้ไข เพื่อดำเนินการ",
+    )?.trim() : undefined;
+    if (adminEditing && confirm === undefined) return;
     setBusy(true);
     try {
-      await api(existing ? "/registrations/" + existing.id : "/registrations", {
+      const endpoint = adminEditing ? "/admin/registrations/" + existing.id + "/edit"
+        : adminOwner ? "/admin/registrations/create" : existing ? "/registrations/" + existing.id : "/registrations";
+      await api(endpoint, {
         competition_id: competition.id,
+        owner_id: adminOwner?.id,
+        confirm,
         request_id: requestId.current,
         revision: existing?.revision,
         coaches,
@@ -357,8 +368,9 @@ function RegistrationForm({
         {studentCount(competition)}
       </p>
       <p className="muted">
-        ผู้ฝึกซ้อม: {user.name} · {user.school}
+        ผู้ฝึกซ้อม: {existing?.coach_name || adminOwner?.name || user.name} · {existing?.coach_school || adminOwner?.school || user.school}
       </p>
+      {adminEditing && <p className="notice">เมื่อบันทึก ใบสมัครจะกลับไปรอตรวจและคะแนนของทีมนี้จะถูกลบ</p>}
       {existing?.review_note && (
         <div className="notice">
           ข้อเสนอแนะจากผู้จัด: {existing.review_note}
@@ -626,12 +638,27 @@ function RegistrationForm({
     </section>
   );
 }
-function RegistrationCard({ row, review, user, onEdit, onReviewed }) {
+function RegistrationCard({ row, review, user, onEdit, onReviewed, onDeleted }) {
   const [expanded, setExpanded] = useState(false),
     [note, setNote] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const selfReview = !user.is_superadmin && row.owner_id === user.id;
+  const admin = review && user.is_superadmin;
+  async function remove() {
+    const confirm = confirmDelete(`ลบทีม ${row.coach_name} ในรายการ “${row.title}” พร้อมเอกสาร คะแนน และไฟล์เกียรติบัตรของทีม`);
+    if (confirm === undefined) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api("/admin/console/registrations/" + row.id + "/delete", { revision: row.revision, confirm });
+      onDeleted(result.remaining);
+    } catch (error) {
+      setError(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function decide(status) {
     if (busy) return;
     if (status === "changes_requested" && !note.trim()) {
@@ -685,6 +712,12 @@ function RegistrationCard({ row, review, user, onEdit, onReviewed }) {
         >
           {expanded ? "ซ่อนรายละเอียด" : "ดูข้อมูลและเอกสาร"}
         </button>
+        {admin && (
+          <>
+            <button className="secondary" disabled={busy} onClick={() => onEdit(row)}>แก้ข้อมูลใบสมัคร</button>
+            <button className="danger-button" disabled={busy} onClick={remove}>ลบใบสมัคร</button>
+          </>
+        )}
         {!review &&
           row.status !== "approved" &&
           Boolean(row.registration_open) && (
@@ -693,6 +726,7 @@ function RegistrationCard({ row, review, user, onEdit, onReviewed }) {
             </button>
           )}
       </div>
+      {error && <p className="error" role="alert">{error}</p>}
       {expanded && (
         <div className="registration-details">
           <CompetitionRules
@@ -754,11 +788,6 @@ function RegistrationCard({ row, review, user, onEdit, onReviewed }) {
                     disabled={busy}
                   />
                 </label>
-                {error && (
-                  <p role="alert" className="error">
-                    {error}
-                  </p>
-                )}
                 <div className="form-actions">
                   <button
                     className="primary"
@@ -783,6 +812,9 @@ function RegistrationCard({ row, review, user, onEdit, onReviewed }) {
   );
 }
 function ManageCompetitions({ competitions, onChanged }) {
+  const [selected, setSelected] = useState(null);
+  const [notice, setNotice] = useState("");
+  const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   async function create(e) {
@@ -806,8 +838,12 @@ function ManageCompetitions({ competitions, onChanged }) {
       setBusy(false);
     }
   }
+  if (selected) return <CompetitionEditor key={selected.id} competition={selected}
+    onSaved={message => { setNotice(message); setSelected(null); onChanged(); }}
+    onCancel={() => setSelected(null)} />;
   return (
     <>
+      {notice && <p className="success-message" role="status">{notice}</p>}
       <section className="panel">
         <h2>เพิ่มรายการแข่งขัน</h2>
         <form onSubmit={create}>
@@ -871,14 +907,20 @@ function ManageCompetitions({ competitions, onChanged }) {
           </fieldset>
         </form>
       </section>
+      <label className="field">ค้นหารายการเพื่อแก้ไข
+        <input type="search" value={search} onChange={event => setSearch(event.target.value)} />
+      </label>
       <div className="competition-list">
-        {competitions.map((c) => (
+        {competitions.filter(c => (c.title + " " + c.category + " " + c.grade_label)
+          .toLowerCase().includes(search.trim().toLowerCase())).map((c) => (
           <article className="panel" key={c.id}>
             <h3>{c.title}</h3>
             <p>
               {c.grade_label} ·{" "}
               {c.registration_open ? "เปิดรับสมัคร" : "ปิดรับสมัคร"}
             </p>
+            <div className="form-actions">
+            <button className="primary" disabled={busy} onClick={() => setSelected(c)}>แก้รายการและเกณฑ์</button>
             <button
               className="secondary"
               disabled={busy}
@@ -899,6 +941,7 @@ function ManageCompetitions({ competitions, onChanged }) {
             >
               {c.registration_open ? "ปิดรับสมัคร" : "เปิดรับสมัคร"}
             </button>
+            </div>
           </article>
         ))}
       </div>
@@ -918,7 +961,8 @@ export default function CompetitionRegistration({ user, tab, onTab }) {
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [success, setSuccess] = useState(""),
-    [form, setForm] = useState(null);
+    [form, setForm] = useState(null),
+    [adminAccounts, setAdminAccounts] = useState(null);
   const [search, setSearch] = useState(""),
     [category, setCategory] = useState(""),
     [division, setDivision] = useState(""),
@@ -972,6 +1016,7 @@ export default function CompetitionRegistration({ user, tab, onTab }) {
   useEffect(() => {
     setPage(1);
     setForm(null);
+    setAdminAccounts(null);
     if (keepSuccess.current) keepSuccess.current = false;
     else setSuccess("");
   }, [tab]);
@@ -1003,6 +1048,8 @@ export default function CompetitionRegistration({ user, tab, onTab }) {
         <ResultsPanel key={version} reviewer={reviewer} />
       ) : tab === "certificates" ? (
         <CertificatesPanel key={version} user={user} />
+      ) : tab === "scoring" ? (
+        <ScoringAdmin competitions={competitions} />
       ) : tab === "judges" ? (
         loading ? (
           <p role="status">กำลังโหลด…</p>
@@ -1015,10 +1062,19 @@ export default function CompetitionRegistration({ user, tab, onTab }) {
           user={user}
           competition={form.competition}
           existing={form.existing}
+          adminEditing={form.adminEditing}
+          adminOwner={form.adminOwner}
           imported={form.imported}
           onCancel={() => setForm(null)}
           onDone={() => {
             setForm(null);
+            if (form.adminEditing || form.adminOwner) {
+              setFilter("pending");
+              setPage(1);
+              refresh();
+              setSuccess("บันทึกข้อมูลแล้ว ใบสมัครกลับไปรอตรวจ");
+              return;
+            }
             setTab("mine");
             setPage(1);
             refresh();
@@ -1236,6 +1292,43 @@ export default function CompetitionRegistration({ user, tab, onTab }) {
               </label>
             )}
           </div>
+          {tab === "review" && user.is_superadmin && (
+            <section className="panel">
+              {adminAccounts ? (
+                <form onSubmit={event => {
+                  event.preventDefault();
+                  const data = new FormData(event.currentTarget);
+                  const competition = competitions.find(c => c.id === data.get("competition"));
+                  const adminOwner = adminAccounts.find(account => account.id === data.get("owner"));
+                  if (competition && adminOwner) setForm({ competition, adminOwner });
+                }}>
+                  <div className="student-fields">
+                    <label className="field">รายการแข่งขัน<select name="competition" required>
+                      <option value="">เลือกการแข่งขัน</option>
+                      {competitions.map(c => <option key={c.id} value={c.id}>{c.title} · {c.grade_label}</option>)}
+                    </select></label>
+                    <label className="field">บัญชีผู้ฝึกซ้อม<select name="owner" required>
+                      <option value="">เลือกผู้ฝึกซ้อม</option>
+                      {adminAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {account.school}</option>)}
+                    </select></label>
+                  </div>
+                  <div className="form-actions">
+                    <button className="primary" type="submit">กรอกข้อมูลนักเรียน</button>
+                    <button className="secondary" type="button" onClick={() => setAdminAccounts(null)}>ยกเลิก</button>
+                  </div>
+                </form>
+              ) : (
+                <button className="secondary" onClick={async () => {
+                  try {
+                    const result = await api("/admin/users");
+                    setAdminAccounts(result.users.filter(account => account.is_superadmin || account.roles.includes("coach")));
+                  } catch (error) {
+                    setError(error.message);
+                  }
+                }}>เพิ่มใบสมัครแทนผู้ฝึกซ้อม</button>
+              )}
+            </section>
+          )}
           {!rows.length ? (
             <section className="panel">
               <p>
@@ -1255,11 +1348,16 @@ export default function CompetitionRegistration({ user, tab, onTab }) {
                   setSuccess("บันทึกผลตรวจแล้ว");
                   refresh();
                 }}
+                onDeleted={(remaining) => {
+                  setSuccess(remaining ? `ลบใบสมัครแล้ว มีไฟล์ Drive รอลบอีก ${remaining} ไฟล์` : "ลบใบสมัครแล้ว");
+                  if (rows.length === 1 && page > 1) setPage(page - 1);
+                  refresh();
+                }}
                 onEdit={(existing) => {
                   const competition = competitions.find(
                     (c) => c.id === existing.competition_id,
                   );
-                  if (competition) setForm({ competition, existing });
+                  if (competition) setForm({ competition, existing, adminEditing: tab === "review" && user.is_superadmin });
                 }}
               />
             ))

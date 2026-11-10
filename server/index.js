@@ -1,3 +1,4 @@
+import { adminApi, cleanAdminFiles, queueFile } from "./admin.js";
 import { registrationsApi } from "./registrations.js";
 import { judgingApi } from "./judging.js";
 import { driveEnabled, deleteFiles } from "./drive.js";
@@ -376,6 +377,12 @@ async function api(r, env, ctx) {
         .run();
     return json({ ok: true }, 200, { "Set-Cookie": sessionCookie(r, "", 0) });
   }
+  if (path.startsWith("/api/admin/console/")) {
+    const user = await currentUser(r, db);
+    if (!user) fail(401, "กรุณาเข้าสู่ระบบ");
+    if (!user.is_superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
+    return adminApi(r, env, user, { body, json, fail });
+  }
   if (
     path === "/api/competitions" ||
     path.startsWith("/api/competitions/") ||
@@ -440,7 +447,7 @@ async function api(r, env, ctx) {
         "DELETE FROM registration_documents",
         "DELETE FROM event_judges",
         "DELETE FROM event_competitions",
-        `DELETE FROM app_settings WHERE key<>'system_enabled' AND key NOT GLOB 'drive_folder:*' AND NOT (${pending})`,
+        `DELETE FROM app_settings WHERE key<>'system_enabled' AND key NOT GLOB 'drive_folder:*' AND key NOT GLOB 'admin_delete_file:*' AND NOT (${pending})`,
         activationSql,
       ].map(sql => db.prepare(sql)));
     }
@@ -492,17 +499,17 @@ async function api(r, env, ctx) {
       .first();
     if (!target) fail(404, "ไม่พบบัญชี");
     if (target.is_superadmin) fail(400, "ไม่สามารถลบบัญชี superadmin ได้");
+    if ((await body(r)).confirm !== "ลบถาวร") fail(400, "กรุณาพิมพ์คำยืนยันให้ถูกต้อง");
     const own = "SELECT id FROM event_registrations WHERE owner_id=?1";
-    const driveIds = (
-      await db
-        .prepare(
-          "SELECT drive_file_id AS id FROM registration_documents WHERE owner_id=? AND drive_file_id IS NOT NULL",
-        )
-        .bind(id)
-        .all()
-    ).results.map((x) => x.id);
     await db.batch(
       [
+        queueFile(`SELECT drive_file_id AS id FROM registration_documents WHERE owner_id=?1
+          UNION SELECT drive_file_id FROM certificate_files WHERE unit_key IN
+          (SELECT 'student.'||id FROM (${own}) UNION SELECT 'coach.'||id FROM (${own}))
+          OR unit_key='judge.'||competition_id||'.'||?1`),
+        `DELETE FROM certificate_files WHERE unit_key IN
+          (SELECT 'student.'||id FROM (${own}) UNION SELECT 'coach.'||id FROM (${own}))
+          OR unit_key='judge.'||competition_id||'.'||?1`,
         `DELETE FROM event_scores WHERE judge_id=?1 OR registration_id IN (${own})`,
         `DELETE FROM event_registration_reviews WHERE registration_id IN (${own})`,
         "UPDATE event_registration_reviews SET reviewer_id=?2 WHERE reviewer_id=?1",
@@ -522,8 +529,7 @@ async function api(r, env, ctx) {
         db.prepare(sql).bind(...(sql.includes("?2") ? [id, user.id] : [id])),
       ),
     );
-    if (driveEnabled(env)) await deleteFiles(env, driveIds);
-    return json({ ok: true });
+    return json({ ok: true, remaining: await cleanAdminFiles(env) });
   }
   fail(404, "ไม่พบรายการที่ร้องขอ");
 }

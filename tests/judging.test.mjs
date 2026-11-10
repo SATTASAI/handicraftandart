@@ -18,7 +18,7 @@ async function runtime(t, beforeUpgrade) {
         "catalog.js",
         "judging.js",
         "mail.js",
-        "drive.js",
+        "drive.js", "admin.js",
       ].map((f) => ({
         type: "ESModule",
         path: "server/" + f,
@@ -213,7 +213,7 @@ test("superadmin deletes accounts and resets competition data", async (t) => {
   const otherTeam = await reg(other, "สอง");
   await request("/admin/judges", { competition_id, judge_id: coach.body.user.id, assigned: true }, admin.cookie);
   assert.equal((await request("/judging/" + competition_id + "/scores", { registration_id: otherTeam, revision: 1, scores: [75] }, coach.cookie)).status, 200);
-  const del = (id, who) => request("/admin/users/" + id + "/delete", {}, who.cookie);
+  const del = (id, who) => request("/admin/users/" + id + "/delete", { confirm: "ลบถาวร" }, who.cookie);
   assert.equal((await del(other.body.user.id, coach)).status, 403);
   assert.equal((await del(admin.body.user.id, admin)).status, 400);
   const ok = await del(coach.body.user.id, admin);
@@ -292,4 +292,95 @@ test("a new round rebuilds competitions from the retained catalog and preserves 
   await request("/admin/system", { enabled: true }, admin.cookie);
   assert.equal((await request("/portal")).body.stats.students, 0);
   assert.equal((await db.prepare("PRAGMA foreign_key_check").all()).results.length, 0);
+});
+
+test("superadmin console manages accounts, rules, team evidence, scoring and publication", async (t) => {
+  const { db, request, signup, raw, upload } = await runtime(t);
+  const admin = await signup("console-admin");
+  const coach = await signup("console-coach");
+  const judge = await signup("console-judge", ["judge"]);
+  const read = (path, who = admin) => request(path, undefined, who.cookie);
+  const write = (path, data, who = admin) => request(path, data, who.cookie);
+  const root = "/admin/console/";
+  const userId = coach.body.user.id;
+  assert.equal((await request(root + "overview")).status, 401);
+  assert.equal((await read(root + "overview", coach)).status, 403);
+  const created = await write(root + "users", {
+    name: "ครูใหม่", school: "โรงเรียนทดสอบ", email: "created@example.test",
+    coach: true, judge: false, password: "temporary-test-only-passphrase",
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  assert.equal(created.body.user.is_superadmin, false);
+  assert.equal((await write(root + "users/" + userId, {
+    name: "ครูผู้ฝึกซ้อมใหม่", school: "โรงเรียนทดสอบ", email: coach.body.user.email,
+    coach: true, judge: false,
+  })).status, 200);
+  assert.equal((await write("/admin/users/" + created.body.user.id + "/delete", {})).status, 400);
+  assert.equal((await write("/admin/users/" + created.body.user.id + "/delete", { confirm: "ลบถาวร" })).status, 200);
+  const competition = await write("/admin/competitions", {
+    title: "รายการของแอดมิน", min_students: 1, max_students: 1,
+  });
+  const id = competition.body.id;
+  const scoring = root + "scoring/" + id;
+  const publish = root + "results/" + id;
+  const edit = {
+    title: "การแข่งขันใหม่", category: "ทดสอบ", grade_label: "ป.4",
+    venue: "อาคารหนึ่ง", starts_at: "2026-11-15T02:00:00.000Z", min_students: 1, max_students: null,
+    registration_open: false, criteria: [{ label: "ผลงาน", max: 80 }],
+    eligibility: { grades: ["ป.4"], gender: "", coach_min: 1, coach_max: null, work_required: false },
+  };
+  const updated = await write(root + "competitions/" + id, edit);
+  assert.equal(updated.status, 200, JSON.stringify(updated.body));
+  const list = await read("/competitions");
+  const info = list.body.competitions.find(c => c.id === id);
+  assert.equal(info.venue, edit.venue);
+  assert.equal(info.max_students, null);
+  const image = await upload(admin.cookie);
+  const entry = await write("/admin/registrations/create", {
+    competition_id: id, owner_id: userId, request_id: crypto.randomUUID(), students: [student(image)],
+  });
+  assert.equal(entry.status, 201, JSON.stringify(entry.body));
+  const team = entry.body.registration;
+  assert.equal(team.owner_id, userId);
+  assert.equal((await raw("/registration-documents/" + image, coach.cookie, undefined, undefined, "GET")).status, 200);
+  const review = (revision) => write("/admin/registrations/" + team.id + "/review", { revision, status: "approved" });
+  assert.equal((await review(1)).status, 200);
+  const judgeId = judge.body.user.id;
+  assert.equal((await write("/admin/judges", { competition_id: id, judge_id: judgeId, assigned: true })).status, 200);
+  const score = { registration_id: team.id, judge_id: judgeId, revision: 1, scores: [75] };
+  assert.equal((await write(scoring, score, judge)).status, 403);
+  assert.equal((await write(scoring, { ...score, scores: [81] })).status, 400);
+  assert.equal((await write(scoring, score)).status, 200);
+  assert.equal((await read("/results/" + id, coach)).body.teams[0].score, 75);
+  assert.equal((await write(root + "competitions/" + id, { ...edit, criteria: [{ label: "ผลงาน", max: 100 }] })).status, 409);
+  assert.equal((await write(publish, { action: "hold" })).status, 200);
+  assert.equal((await read("/results/" + id, coach)).status, 404);
+  assert.equal((await read("/certificates", coach)).body.certificates.length, 0);
+  assert.equal((await write(publish, { action: "publish" })).status, 200);
+  assert.equal((await read("/results/" + id, coach)).status, 200);
+  const replacement = await upload(admin.cookie);
+  const update = await write("/admin/registrations/" + team.id + "/edit", {
+    revision: 1, confirm: "ยืนยันแก้ไข", students: [student(replacement, "นักเรียนใหม่")],
+  });
+  assert.equal(update.status, 200, JSON.stringify(update.body));
+  assert.equal(update.body.registration.status, "pending");
+  assert.equal(update.body.registration.revision, 2);
+  assert.equal((await raw("/registration-documents/" + image, admin.cookie, undefined, undefined, "GET")).status, 404);
+  assert.equal((await read(scoring)).body.scores.length, 0);
+  assert.equal((await review(2)).status, 200);
+  assert.equal((await write(scoring, { ...score, revision: 2 })).status, 200);
+  assert.equal((await read("/results/" + id, coach)).status, 404);
+  assert.equal((await write(scoring, { ...score, revision: 2, action: "delete", confirm: "ลบถาวร" })).status, 200);
+  const removeTeam = root + "registrations/" + team.id + "/delete";
+  assert.equal((await write(removeTeam, { revision: 1, confirm: "ลบถาวร" })).status, 409);
+  assert.equal((await write(removeTeam, { revision: 2, confirm: "ลบถาวร" })).status, 200);
+  assert.equal((await raw("/registration-documents/" + replacement, admin.cookie, undefined, undefined, "GET")).status, 404);
+  assert.equal((await write(root + "competitions/" + id, { action: "delete", confirm: "ลบถาวร" })).status, 409);
+  assert.equal((await write("/admin/judges", { competition_id: id, judge_id: judgeId, assigned: false })).status, 200);
+  assert.equal((await write(root + "competitions/" + id, { action: "delete", confirm: "ลบถาวร" })).status, 200);
+  const imported = list.body.competitions.find(c => c.catalog_key);
+  assert.equal((await write(root + "competitions/" + imported.id, { action: "delete", confirm: "ลบถาวร" })).status, 200);
+  assert.equal((await read("/competitions")).body.competitions.some(c => c.id === imported.id), false);
+  assert.equal((await read(root + "overview")).body.registrations, 0);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM account_bootstrap").first()).n, 1);
 });
