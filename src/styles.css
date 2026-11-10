@@ -1518,3 +1518,45 @@ details.panel summary {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+.admin-intro {
+  border-top: 4px solid #2258a7;
+}
+.admin-intro h1 {
+  margin: .3rem 0;
+}
+.admin-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: .65rem;
+}
+.admin-stats > div {
+  border-radius: .65rem;
+  background: #eef5ff;
+  color: #193b69;
+  padding: .65rem .8rem;
+}
+.admin-stats dd {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: .2rem 0 0;
+}
+.admin-criterion {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(6rem, 9rem) auto;
+  align-items: end;
+  gap: .6rem;
+  margin-block: .5rem;
+}
+.admin-criterion .field {
+  margin: 0;
+}
+@media (max-width: 540px) {
+  .admin-criterion {
+    grid-template-columns: minmax(0, 1fr) 6rem;
+  }
+  .admin-criterion button {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+}

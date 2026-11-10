@@ -121,6 +121,8 @@ export async function computeResults(db, competition) {
     };
   });
   const complete = teams.length > 0 && teams.every((t) => t.complete);
+  const published = complete && !(await db.prepare("SELECT 1 FROM app_settings WHERE key=?")
+    .bind("results_hold:" + competition.id).first());
   const ranked = [...teams].sort(
     (a, b) => (b.percent ?? -1) - (a.percent ?? -1),
   );
@@ -143,6 +145,7 @@ export async function computeResults(db, competition) {
     max_total: maxTotal,
     judges: judges.map((j) => ({ id: j.judge_id, name: j.name, school: j.school })),
     complete,
+    published,
     teams: ranked,
   };
 }
@@ -309,7 +312,7 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
       const total = round2(scores.reduce((a, v) => a + v, 0));
       const res = await db
         .prepare(
-          "INSERT INTO event_scores(registration_id,judge_id,revision,scores_json,total,updated_at) SELECT r.id,?,r.revision,?,?,? FROM event_registrations r WHERE r.id=? AND r.competition_id=? AND r.status='approved' AND r.revision=? AND r.owner_id<>? AND EXISTS(SELECT 1 FROM event_judges WHERE competition_id=r.competition_id AND judge_id=?) ON CONFLICT(registration_id,judge_id) DO UPDATE SET revision=excluded.revision,scores_json=excluded.scores_json,total=excluded.total,updated_at=excluded.updated_at",
+          "INSERT INTO event_scores(registration_id,judge_id,revision,scores_json,total,updated_at) SELECT r.id,?,r.revision,?,?,? FROM event_registrations r WHERE r.id=? AND r.competition_id=? AND r.status='approved' AND r.revision=? AND r.owner_id<>? AND EXISTS(SELECT 1 FROM event_judges WHERE competition_id=r.competition_id AND judge_id=?) AND EXISTS(SELECT 1 FROM event_competitions WHERE id=r.competition_id AND rules_json=?) ON CONFLICT(registration_id,judge_id) DO UPDATE SET revision=excluded.revision,scores_json=excluded.scores_json,total=excluded.total,updated_at=excluded.updated_at",
         )
         .bind(
           user.id,
@@ -321,6 +324,7 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
           b.revision,
           user.id,
           user.id,
+          c.rules_json,
         )
         .run();
       if (!res.meta.changes)
@@ -341,10 +345,11 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
     const list = [];
     for (const c of comps) {
       const res = await computeResults(db, c);
-      if (!res.complete && !reviewer) continue;
+      if (!res.published && !reviewer) continue;
       list.push({
         ...res.competition,
         complete: res.complete,
+        published: res.published,
         teams: res.teams.length,
         judges: res.judges.length,
         scored: res.teams.filter((t) => t.complete).length,
@@ -355,7 +360,7 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
   const resultMatch = path.match(/^\/api\/results\/([a-zA-Z0-9-]+)$/);
   if (resultMatch && method === "GET") {
     const res = await computeResults(db, await competition(resultMatch[1]));
-    if (!res.complete && !reviewer) fail(404, "ยังไม่ประกาศผลรายการนี้");
+    if (!res.published && !reviewer) fail(404, "ยังไม่ประกาศผลรายการนี้");
     return json({ ...res, teams: res.teams.map(strip) });
   }
 
@@ -435,7 +440,7 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
         (t) => superadmin || judging || t.owner_id === user.id,
       );
       if (!res.teams.length) continue;
-      if (!res.complete) {
+      if (!res.published) {
         pending.push({ ...res.competition, teams: mine.length });
         continue;
       }
@@ -494,7 +499,7 @@ export async function judgingApi(r, env, user, { body, json, fail }) {
     }
     const c = await competition(competitionId);
     const res = await computeResults(db, c);
-    if (!res.complete) fail(404, "ยังไม่ประกาศผลรายการนี้");
+    if (!res.published) fail(404, "ยังไม่ประกาศผลรายการนี้");
     const judging = res.judges.some((j) => j.id === user.id);
     let payload = null;
     if (fileMatch[1]) {

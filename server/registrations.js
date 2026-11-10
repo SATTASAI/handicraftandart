@@ -1,3 +1,4 @@
+import { cleanAdminFiles, holdResultsFor, queueFile } from "./admin.js";
 import { activationSql } from "./catalog.js";
 import { now, digest, publicUser } from "./security.js";
 import { driveEnabled, uploadFile, downloadFile, deleteFiles } from "./drive.js";
@@ -436,26 +437,37 @@ export async function registrationsApi(
       fail(404, "ไม่พบรายการสมัคร");
     return json({ registration: row });
   }
+  const adminEditMatch = path.match(/^\/api\/admin\/registrations\/([a-f0-9-]+)\/edit$/i);
+  const adminCreate = path === "/api/admin/registrations/create";
   if (
-    (path === "/api/registrations" || registrationMatch) &&
+    (path === "/api/registrations" || registrationMatch || adminEditMatch || adminCreate) &&
     method === "POST"
   ) {
     requireCoach();
+    const adminEditing = Boolean(adminEditMatch);
+    const adminWrite = adminCreate || adminEditing;
+    if (adminWrite && !superadmin) fail(403, "เฉพาะ superadmin เท่านั้น");
     const b = await body(r, 262144),
-      editing = Boolean(registrationMatch);
+      editing = Boolean(registrationMatch || adminEditMatch);
     const existing = editing
       ? await db
           .prepare(
-            "SELECT * FROM event_registrations WHERE id=? AND owner_id=?",
+            "SELECT * FROM event_registrations WHERE id=? AND (owner_id=? OR ?=1)",
           )
-          .bind(registrationMatch[1], user.id)
+          .bind((adminEditMatch || registrationMatch)[1], user.id, Number(adminEditing))
           .first()
       : null;
     if (editing && !existing) fail(404, "ไม่พบรายการสมัคร");
-    if (existing?.status === "approved")
+    if (!adminEditing && existing?.status === "approved")
       fail(409, "ยืนยันการลงทะเบียนแล้ว ไม่สามารถแก้ไขข้อมูลได้");
     if (editing && b.revision !== existing.revision)
       fail(409, "ข้อมูลเปลี่ยนแล้ว กรุณาโหลดรายการใหม่");
+    if (adminEditing && b.confirm !== "ยืนยันแก้ไข") fail(400, "กรุณาพิมพ์คำยืนยันให้ถูกต้อง");
+    const owner = adminCreate && uuid(b.owner_id)
+      ? await db.prepare("SELECT id,name FROM account_users WHERE id=? AND (is_coach=1 OR is_superadmin=1)").bind(b.owner_id).first()
+      : user;
+    if (adminCreate && (!uuid(b.owner_id) || !owner)) fail(400, "เลือกบัญชีผู้ฝึกซ้อม");
+    const ownerId = existing?.owner_id || owner.id;
     const competitionId = existing?.competition_id || b.competition_id;
     const competition = effectiveCounts(
       await db
@@ -464,7 +476,7 @@ export async function registrationsApi(
         .first(),
     );
     if (!competition) fail(404, "ไม่พบรายการแข่งขัน");
-    if (!competition.registration_open) fail(409, "รายการนี้ปิดรับสมัครแล้ว");
+    if (!adminWrite && !competition.registration_open) fail(409, "รายการนี้ปิดรับสมัครแล้ว");
     if (
       !Array.isArray(b.students) ||
       b.students.length < competition.min_students ||
@@ -534,7 +546,7 @@ export async function registrationsApi(
     )
       fail(400, "รายการนี้ต้องมีนักเรียนชาย 1 คนและนักเรียนหญิง 1 คน");
     const coaches = (
-      Array.isArray(b.coaches) ? b.coaches : [{ name: user.name }]
+      Array.isArray(b.coaches) ? b.coaches : [{ name: owner.name }]
     ).map((c) => ({ name: text(c?.name, 100) }));
     const work = text(b.work_url, 2000);
     if (
@@ -578,7 +590,7 @@ export async function registrationsApi(
         .prepare(
           "SELECT id,payload_hash FROM event_registrations WHERE owner_id=? AND request_id=?",
         )
-        .bind(user.id, requestId)
+        .bind(ownerId, requestId)
         .first();
       if (duplicate) {
         if (duplicate.payload_hash !== payloadHash)
@@ -609,7 +621,7 @@ export async function registrationsApi(
         `${dup.first_name} ${dup.last_name} ลงทะเบียนในรายการนี้แล้ว (อาจเป็นทีมอื่นหรือครูท่านอื่น)`,
       );
     if (
-      await db
+      !adminWrite && await db
         .prepare(
           "SELECT 1 FROM event_scores s JOIN event_registrations r ON r.id=s.registration_id WHERE r.competition_id=? LIMIT 1",
         )
@@ -619,9 +631,9 @@ export async function registrationsApi(
       fail(409, "รายการนี้เริ่มตัดสินแล้ว ไม่รับสมัครหรือแก้ไขทีมเพิ่ม");
     const validDocuments = await db
       .prepare(
-        "SELECT COUNT(*) AS total FROM json_each(?) j JOIN registration_documents d ON d.id=json_extract(j.value,'$.document_id') WHERE d.owner_id=? AND NOT EXISTS(SELECT 1 FROM event_students s WHERE s.document_id=d.id AND s.registration_id<>?)",
+        "SELECT COUNT(*) AS total FROM json_each(?) j JOIN registration_documents d ON d.id=json_extract(j.value,'$.document_id') WHERE (d.owner_id=? OR (?=1 AND d.owner_id=?)) AND NOT EXISTS(SELECT 1 FROM event_students s WHERE s.document_id=d.id AND s.registration_id<>?)",
       )
-      .bind(JSON.stringify(students), user.id, existing?.id || "")
+      .bind(JSON.stringify(students), ownerId, Number(adminWrite), user.id, existing?.id || "")
       .first();
     if (validDocuments.total !== students.length)
       fail(400, "ภาพบัตรต้องเป็นของบัญชีนี้และไม่ถูกใช้ในทีมอื่น");
@@ -641,7 +653,7 @@ export async function registrationsApi(
     const statement = editing
       ? db
           .prepare(
-            "UPDATE event_registrations SET payload_hash=?,work_url=?,coaches_json=?,variant=?,status='pending',revision=revision+1,write_token=?,review_note='',reviewed_by=NULL,reviewed_at=NULL,updated_at=? WHERE id=? AND owner_id=? AND revision=? AND status<>'approved' AND EXISTS(SELECT 1 FROM event_competitions WHERE id=event_registrations.competition_id AND registration_open=1 AND COALESCE(roster_min_students,min_students)=? AND (CASE WHEN roster_min_students IS NULL THEN max_students ELSE roster_max_students END) IS ?)",
+            "UPDATE event_registrations SET payload_hash=?,work_url=?,coaches_json=?,variant=?,status='pending',revision=revision+1,write_token=?,review_note='',reviewed_by=NULL,reviewed_at=NULL,updated_at=? WHERE id=? AND owner_id=? AND revision=? AND (?=1 OR status<>'approved') AND EXISTS(SELECT 1 FROM event_competitions WHERE id=event_registrations.competition_id AND (?=1 OR registration_open=1) AND rules_json=? AND COALESCE(roster_min_students,min_students)=? AND (CASE WHEN roster_min_students IS NULL THEN max_students ELSE roster_max_students END) IS ?)",
           )
           .bind(
             payloadHash,
@@ -651,19 +663,22 @@ export async function registrationsApi(
             writeToken,
             t,
             id,
-            user.id,
+            existing.owner_id,
             existing.revision,
+            Number(adminEditing),
+            Number(adminEditing),
+            competition.rules_json,
             competition.min_students,
             competition.max_students,
           )
       : db
           .prepare(
-            "INSERT INTO event_registrations(id,competition_id,owner_id,request_id,payload_hash,write_token,created_at,updated_at,work_url,coaches_json,variant) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM event_competitions WHERE id=? AND registration_open=1 AND COALESCE(roster_min_students,min_students)=? AND (CASE WHEN roster_min_students IS NULL THEN max_students ELSE roster_max_students END) IS ?)",
+            "INSERT INTO event_registrations(id,competition_id,owner_id,request_id,payload_hash,write_token,created_at,updated_at,work_url,coaches_json,variant) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE (?=0 OR EXISTS(SELECT 1 FROM account_users WHERE id=? AND (is_coach=1 OR is_superadmin=1))) AND EXISTS(SELECT 1 FROM event_competitions WHERE id=? AND (?=1 OR registration_open=1) AND rules_json=? AND COALESCE(roster_min_students,min_students)=? AND (CASE WHEN roster_min_students IS NULL THEN max_students ELSE roster_max_students END) IS ?)",
           )
           .bind(
             id,
             competitionId,
-            user.id,
+            ownerId,
             requestId,
             payloadHash,
             writeToken,
@@ -672,7 +687,11 @@ export async function registrationsApi(
             work,
             JSON.stringify(coaches),
             variant,
+            Number(adminCreate),
+            ownerId,
             competitionId,
+            Number(adminCreate),
+            competition.rules_json,
             competition.min_students,
             competition.max_students,
           );
@@ -696,11 +715,18 @@ export async function registrationsApi(
               students.map((s) => ({ ...s, id: crypto.randomUUID() })),
             ),
           ),
-        db
-          .prepare(
-            "DELETE FROM registration_documents WHERE owner_id=? AND id IN (SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM event_students WHERE document_id=registration_documents.id) RETURNING drive_file_id",
-          )
-          .bind(user.id, JSON.stringify(oldDocuments)),
+        ...adminWrite ? [
+          db.prepare("UPDATE registration_documents SET owner_id=? WHERE owner_id=? AND id IN (SELECT document_id FROM event_students WHERE registration_id=?) AND EXISTS(SELECT 1 FROM event_registrations WHERE id=? AND write_token=?)")
+            .bind(ownerId, user.id, id, id, writeToken),
+          db.prepare(holdResultsFor("SELECT competition_id FROM event_registrations WHERE id=? AND write_token=?"))
+            .bind(id, writeToken),
+          db.prepare("DELETE FROM event_scores WHERE registration_id=? AND EXISTS(SELECT 1 FROM event_registrations WHERE id=? AND write_token=?)")
+            .bind(id, id, writeToken),
+          db.prepare(queueFile("SELECT drive_file_id AS id FROM registration_documents WHERE owner_id=? AND id IN (SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM event_students WHERE document_id=registration_documents.id) AND EXISTS(SELECT 1 FROM event_registrations WHERE id=? AND write_token=?)"))
+            .bind(ownerId, JSON.stringify(oldDocuments), id, writeToken),
+        ] : [],
+        db.prepare("DELETE FROM registration_documents WHERE owner_id=? AND id IN (SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM event_students WHERE document_id=registration_documents.id) AND EXISTS(SELECT 1 FROM event_registrations WHERE id=? AND write_token=?) RETURNING drive_file_id")
+          .bind(ownerId, JSON.stringify(oldDocuments), id, writeToken),
       ]);
     } catch (error) {
       if (!editing) {
@@ -708,7 +734,7 @@ export async function registrationsApi(
           .prepare(
             "SELECT id,payload_hash FROM event_registrations WHERE owner_id=? AND request_id=?",
           )
-          .bind(user.id, requestId)
+          .bind(ownerId, requestId)
           .first();
         if (duplicate?.payload_hash === payloadHash)
           return json({ registration: await details(db, duplicate.id) }, 200);
@@ -720,11 +746,10 @@ export async function registrationsApi(
         );
       throw error;
     }
-    if (driveEnabled(env))
-      await deleteFiles(
-        env,
-        (batch[3]?.results || []).map((x) => x.drive_file_id),
-      );
+    if (!batch[0].meta.changes) fail(409, "ข้อมูลหรือสถานะรายการเปลี่ยนแล้ว กรุณาโหลดใหม่");
+    if (adminWrite) await cleanAdminFiles(env);
+    else if (driveEnabled(env))
+      await deleteFiles(env, batch.at(-1).results.map((x) => x.drive_file_id));
     return json({ registration: await details(db, id) }, editing ? 200 : 201);
   }
   const reviewMatch = path.match(
@@ -746,6 +771,8 @@ export async function registrationsApi(
       t = now();
     if (
       b.status === "approved" &&
+      (!superadmin || !(await db.prepare(`SELECT 1 FROM app_settings WHERE key=
+        (SELECT 'results_hold:'||competition_id FROM event_registrations WHERE id=?)`).bind(id).first())) &&
       (await db
         .prepare(
           "SELECT 1 FROM event_scores s JOIN event_registrations r ON r.id=s.registration_id JOIN event_registrations x ON x.competition_id=r.competition_id WHERE x.id=? LIMIT 1",

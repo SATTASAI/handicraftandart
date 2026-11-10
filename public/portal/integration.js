@@ -2,7 +2,7 @@
 
 const page = document.body.dataset.page;
 const hash = location.hash.slice(1);
-const tabs = new Set(["competitions", "mine", "review", "judging", "results", "certificates", "manage", "judges", "users", "account"]);
+const tabs = new Set(["admin", "scoring", "competitions", "mine", "review", "judging", "results", "certificates", "manage", "judges", "users", "account"]);
 const workspace = (tab) => tabs.has(tab) ? `/workspace#${tab}` : "/";
 const format = (value) => Number(value).toLocaleString("th-TH");
 
@@ -102,7 +102,7 @@ if (page === "home" && tabs.has(hash)) location.replace(workspace(hash));
 
 if (page === "login") {
   if (hash === "judging") document.querySelector('[data-type="report"]')?.click();
-  if (["manage", "users", "judges"].includes(hash)) document.querySelector('[data-type="admin"]')?.click();
+  if (["admin", "scoring", "manage", "users", "judges"].includes(hash)) document.querySelector('[data-type="admin"]')?.click();
   document.querySelectorAll("[data-login]").forEach((form) => form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const submit = form.querySelector('button[type="submit"]');
@@ -168,7 +168,7 @@ if (page === "reportannounce") {
     const term = search.value.trim().toLowerCase();
     const groups = new Map();
     for (const entry of competitions) {
-      if (status !== "all" && String(entry.complete) !== status) continue;
+      if (status !== "all" && String(entry.published) !== status) continue;
       if (!`${entry.title} ${entry.category || ""} ${entry.grade_label || ""}`.toLowerCase().includes(term)) continue;
       const group = entry.category || "กิจกรรมอื่น ๆ";
       if (!groups.has(group)) groups.set(group, []);
@@ -181,11 +181,11 @@ if (page === "reportannounce") {
       const grid = element("div", "", "row");
       for (const entry of rows) {
         const column = element("div", "", "col-md-4 col-lg-3 mb-2 activity-card");
-        const card = element("div", "", `card h-100 ${entry.complete ? "announced-card" : "pending-card"}`);
+        const card = element("div", "", `card h-100 ${entry.published ? "announced-card" : "pending-card"}`);
         const body = element("div", "", "card-body p-2");
-        body.append(element("span", entry.complete ? "ประกาศผลแล้ว" : "รอประกาศ", `badge ${entry.complete ? "badge-announced" : "bg-secondary"}`));
+        body.append(element("span", entry.published ? "ประกาศผลแล้ว" : "รอประกาศ", `badge ${entry.published ? "badge-announced" : "bg-secondary"}`));
         body.append(element("p", `${entry.title} ${entry.grade_label || ""}`, "card-text mt-2 mb-2"));
-        if (entry.complete) {
+        if (entry.published) {
           const link = element("a", "ดูผล", "btn btn-success btn-sm");
           link.href = `/workspace?competition=${encodeURIComponent(entry.id)}#results`;
           body.append(link);
