@@ -140,14 +140,19 @@ export async function downloadFile(env, id) {
 
 // Best effort: a missing file is fine, other failures are only logged.
 export async function deleteFiles(env, ids) {
+  const failed = [];
   for (const id of ids.filter(Boolean))
     try {
       const r = await call(env, API + "/" + encodeURIComponent(id), {
         method: "DELETE",
       });
-      if (!r.ok && r.status !== 404)
+      if (!r.ok && r.status !== 404) {
+        failed.push(id);
         console.error("drive delete failed", id, r.status);
+      }
     } catch (error) {
+      failed.push(id);
       console.error("drive delete failed", id, error);
     }
+  return failed;
 }
