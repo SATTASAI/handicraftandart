@@ -1,0 +1,13 @@
+
+              body.dark-mode .modal-school-row {
+                border-color: #2c3b4c !important;
+              }
+
+              body.dark-mode .modal-school-name {
+                color: #e9ecef !important;
+              }
+
+              body.dark-mode .modal-rank-other {
+                background: #2c3b4c !important;
+                color: #b2b9bf !important;
+              }

@@ -1,0 +1,67 @@
+
+                    @keyframes blinkGlow {
+
+                      0%,
+                      100% {
+                        opacity: 1;
+                        box-shadow: 0 0 5px #ff4757, 0 0 10px #ff4757, 0 0 15px #ff4757;
+                        transform: scale(1);
+                      }
+
+                      50% {
+                        opacity: 0.8;
+                        box-shadow: 0 0 10px #ff6b81, 0 0 20px #ff6b81, 0 0 30px #ff6b81;
+                        transform: scale(1.05);
+                      }
+                    }
+
+                    @keyframes shimmer {
+                      0% {
+                        background-position: -100% 0;
+                      }
+
+                      100% {
+                        background-position: 200% 0;
+                      }
+                    }
+
+                    .new-badge-blink {
+                      display: inline-flex;
+                      align-items: center;
+                      gap: 4px;
+                      padding: 4px 10px;
+                      font-size: 0.7rem;
+                      font-weight: 700;
+                      text-transform: uppercase;
+                      letter-spacing: 0.5px;
+                      color: #fff;
+                      background: linear-gradient(135deg, #ff4757 0%, #ff6b81 50%, #ff4757 100%);
+                      background-size: 200% 100%;
+                      border-radius: 20px;
+                      animation: blinkGlow 1.5s ease-in-out infinite, shimmer 3s linear infinite;
+                      box-shadow: 0 2px 10px rgba(255, 71, 87, 0.4);
+                      border: 1px solid rgba(255, 255, 255, 0.3);
+                    }
+
+                    .new-badge-blink i {
+                      font-size: 0.65rem;
+                      animation: pulse 0.8s ease-in-out infinite;
+                    }
+
+                    @keyframes pulse {
+
+                      0%,
+                      100% {
+                        transform: scale(1);
+                      }
+
+                      50% {
+                        transform: scale(1.3);
+                      }
+                    }
+
+                    /* Dark mode support */
+                    body.dark-mode .new-badge-blink {
+                      background: linear-gradient(135deg, #ff6b81 0%, #ff4757 50%, #ff6b81 100%);
+                      box-shadow: 0 2px 15px rgba(255, 107, 129, 0.5);
+                    }

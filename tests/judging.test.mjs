@@ -267,7 +267,7 @@ test("a new round rebuilds competitions from the retained catalog and preserves 
   assert.equal(portal.body.stats.students, 1);
   assert.equal(portal.body.stats.schools, 1);
   assert.equal(portal.body.stats.judges, 1);
-  assert.deepEqual(Object.keys(portal.body.stats).sort(), ["activities", "judges", "open_activities", "schools", "students", "teams"]);
+  assert.deepEqual(Object.keys(portal.body.stats).sort(), ["activities", "coaches", "judges", "open_activities", "schools", "students", "teams"]);
   const catalog = (await db.prepare("SELECT id,title,rules_json FROM competition_catalog ORDER BY id").all()).results;
   assert.ok(catalog.length > 0);
   await db.prepare("UPDATE event_competitions SET venue='สนามเดิม',starts_at='2026-02-10',registration_open=0 WHERE catalog_key IS NOT NULL").run();

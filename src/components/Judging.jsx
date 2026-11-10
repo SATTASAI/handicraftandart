@@ -290,7 +290,10 @@ export function JudgePanel() {
 
 // ---------- ผลการแข่งขัน ----------
 export function ResultsPanel({ reviewer }) {
-  const [id, setId] = useState("");
+  const [id, setId] = useState(() => {
+    const competition = new URLSearchParams(location.search).get("competition");
+    return /^[a-zA-Z0-9-]{1,80}$/.test(competition || "") ? competition : "";
+  });
   const list = useLoad("/results", []);
   const detail = useLoad(id ? "/results/" + id : null, []);
   if (id)

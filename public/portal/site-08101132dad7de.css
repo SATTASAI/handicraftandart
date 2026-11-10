@@ -1,0 +1,183 @@
+
+                  .top-school-item {
+                    transition: all 0.2s ease;
+                    border-radius: 12px;
+                    padding: 12px;
+                    margin: 0 -12px;
+                  }
+
+                  .top-school-item:hover {
+                    background: rgba(99, 102, 241, 0.05);
+                    transform: translateX(4px);
+                  }
+
+                  body.dark-mode .top-school-item:hover {
+                    background: rgba(99, 102, 241, 0.15);
+                  }
+
+                  body.dark-mode .top-school-name {
+                    color: #e9ecef !important;
+                  }
+
+                  .rank-icon-badge {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 12px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 1.1rem;
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                  }
+
+                  .rank-1 {
+                    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+                    color: #fff;
+                  }
+
+                  .rank-2 {
+                    background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%);
+                    color: #fff;
+                  }
+
+                  .rank-3 {
+                    background: linear-gradient(135deg, #fb923c 0%, #ea580c 100%);
+                    color: #fff;
+                  }
+
+                  .rank-other {
+                    background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
+                    color: #64748b;
+                    font-weight: 700;
+                    font-size: 1rem;
+                    font-family: var(--font-family) !important;
+                  }
+
+                  body.dark-mode .rank-other {
+                    background: linear-gradient(135deg, #334155 0%, #475569 100%);
+                    color: #94a3b8;
+                  }
+
+                  /* Premium Progress Bar Styles */
+                  .school-progress-container {
+                    height: 6px;
+                    border-radius: 3px;
+                    overflow: hidden;
+                    position: relative;
+                    background: linear-gradient(90deg, rgba(0, 0, 0, 0.03) 0%, rgba(0, 0, 0, 0.02) 100%);
+                    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+                  }
+
+                  body.dark-mode .school-progress-container {
+                    background: linear-gradient(90deg, #1a2634 0%, #2c3b4c 100%);
+                  }
+
+                  .school-progress-bar {
+                    height: 100%;
+                    border-radius: 3px;
+                    position: relative;
+                    overflow: hidden;
+                    width: 0;
+                    animation: slideInBar 1.2s ease-out forwards;
+                  }
+
+                  @keyframes slideInBar {
+                    from {
+                      width: 0;
+                      opacity: 0.3;
+                    }
+
+                    to {
+                      opacity: 1;
+                    }
+                  }
+
+                  /* Stripe animation */
+                  .school-progress-bar::before {
+                    content: '';
+                    position: absolute;
+                    inset: 0;
+                    background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.08) 0 6px, rgba(0, 0, 0, 0.02) 6px 12px);
+                    mix-blend-mode: overlay;
+                    animation: stripeMove 2.5s linear infinite;
+                    pointer-events: none;
+                  }
+
+                  @keyframes stripeMove {
+                    from {
+                      background-position: 0 0;
+                    }
+
+                    to {
+                      background-position: 40px 0;
+                    }
+                  }
+
+                  /* Shimmer effect */
+                  .school-progress-bar::after {
+                    content: '';
+                    position: absolute;
+                    top: 0;
+                    left: -100%;
+                    width: 50%;
+                    height: 100%;
+                    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+                    animation: shimmer 2s ease-in-out infinite;
+                    pointer-events: none;
+                  }
+
+                  @keyframes shimmer {
+                    0% {
+                      left: -100%;
+                    }
+
+                    50% {
+                      left: 100%;
+                    }
+
+                    100% {
+                      left: 100%;
+                    }
+                  }
+
+                  /* Staggered animation delays */
+                  .top-school-item:nth-child(1) .school-progress-bar {
+                    animation-delay: 0s;
+                  }
+
+                  .top-school-item:nth-child(2) .school-progress-bar {
+                    animation-delay: 0.15s;
+                  }
+
+                  .top-school-item:nth-child(3) .school-progress-bar {
+                    animation-delay: 0.3s;
+                  }
+
+                  .top-school-item:nth-child(4) .school-progress-bar {
+                    animation-delay: 0.45s;
+                  }
+
+                  .top-school-item:nth-child(5) .school-progress-bar {
+                    animation-delay: 0.6s;
+                  }
+
+                  /* Gradient colors for each rank */
+                  .progress-gold {
+                    background: linear-gradient(90deg, #FFD700 0%, #FFA500 100%);
+                  }
+
+                  .progress-silver {
+                    background: linear-gradient(90deg, #C0C0C0 0%, #A8A8A8 100%);
+                  }
+
+                  .progress-bronze {
+                    background: linear-gradient(90deg, #CD7F32 0%, #B8860B 100%);
+                  }
+
+                  .progress-purple {
+                    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+                  }
+
+                  .progress-blue {
+                    background: linear-gradient(90deg, #00c6fb 0%, #005bea 100%);
+                  }
