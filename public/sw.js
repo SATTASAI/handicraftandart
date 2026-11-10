@@ -1,7 +1,7 @@
 // Service worker: caches only the public app shell and hashed build assets.
 // Never caches /api/ responses, rule PDFs or anything authenticated.
-const CACHE = "hca-shell-v1";
-const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png"];
+const CACHE = "hca-shell-v2";
+const SHELL = ["/", "/workspace", "/manifest.webmanifest", "/icons/icon-192.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -38,13 +38,13 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          if (response.ok) {
+          if (response.ok && SHELL.includes(url.pathname)) {
             const copy = response.clone();
-            caches.open(CACHE).then((c) => c.put("/", copy));
+            caches.open(CACHE).then((c) => c.put(url.pathname, copy));
           }
           return response;
         })
-        .catch(() => caches.match("/")),
+        .catch(() => caches.match(url.pathname).then((hit) => hit || Response.error())),
     );
     return;
   }

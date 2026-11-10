@@ -1,0 +1,202 @@
+
+                    .competition-results-card {
+                      background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+                      border: 1px solid rgba(99, 102, 241, 0.1);
+                      overflow: hidden;
+                      position: relative;
+                    }
+
+                    body.dark-mode .competition-results-card {
+                      background: linear-gradient(135deg, #243242 0%, #2c3b4c 100%) !important;
+                      border: 1px solid rgba(99, 102, 241, 0.2) !important;
+                    }
+
+                    .competition-results-card::before {
+                      content: '';
+                      position: absolute;
+                      top: -50%;
+                      right: -50%;
+                      width: 100%;
+                      height: 100%;
+                      background: radial-gradient(circle, rgba(99, 102, 241, 0.03) 0%, transparent 70%);
+                      pointer-events: none;
+                    }
+
+                    body.dark-mode .competition-results-card::before {
+                      background: radial-gradient(circle, rgba(99, 102, 241, 0.08) 0%, transparent 70%);
+                    }
+
+
+
+                    .result-ring-container {
+                      position: relative;
+                      width: 130px;
+                      height: 130px;
+                      margin: 0 auto 1rem;
+                    }
+
+                    .result-ring-container svg {
+                      transform: rotate(-90deg);
+                      width: 100%;
+                      height: 100%;
+                    }
+
+                    .result-ring-container .ring-bg {
+                      fill: none;
+                      stroke: #e2e8f0;
+                      stroke-width: 10;
+                    }
+
+                    .result-ring-container .ring-progress {
+                      fill: none;
+                      stroke: url(#resultGradient);
+                      stroke-width: 10;
+                      stroke-linecap: round;
+                      stroke-dasharray: 339.292;
+                      stroke-dashoffset:
+                        0                      ;
+                      transition: stroke-dashoffset 1.5s ease-in-out;
+                      filter: drop-shadow(0 2px 6px rgba(16, 185, 129, 0.3));
+                    }
+
+                    .result-ring-container .ring-center {
+                      position: absolute;
+                      top: 50%;
+                      left: 50%;
+                      transform: translate(-50%, -50%);
+                      text-align: center;
+                    }
+
+                    .result-ring-container .ring-percentage {
+                      font-size: 1.75rem;
+                      font-weight: 800;
+                      color:
+                        #10b981                      ;
+                      line-height: 1;
+                    }
+
+                    .result-ring-container .ring-label {
+                      font-size: 0.65rem;
+                      color: #64748b;
+                      font-weight: 600;
+                      text-transform: uppercase;
+                      letter-spacing: 0.5px;
+                    }
+
+                    .result-stats-grid {
+                      display: grid;
+                      grid-template-columns: repeat(2, 1fr);
+                      gap: 0.5rem;
+                      margin-bottom: 1rem;
+                    }
+
+                    .result-stat-box {
+                      background: white;
+                      border: 1px solid #e2e8f0;
+                      border-radius: 10px;
+                      padding: 0.75rem 0.5rem;
+                      text-align: center;
+                      transition: all 0.3s ease;
+                    }
+
+                    .result-stat-box:hover {
+                      border-color: #6366f1;
+                      transform: translateY(-2px);
+                      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.15);
+                    }
+
+                    .result-stat-box .stat-num {
+                      font-size: 1.25rem;
+                      font-weight: 700;
+                      line-height: 1;
+                      margin-bottom: 0.25rem;
+                    }
+
+                    .result-stat-box .stat-text {
+                      font-size: 0.65rem;
+                      color: #64748b;
+                      font-weight: 500;
+                    }
+
+                    .result-stat-box.total .stat-num {
+                      color: #6366f1;
+                    }
+
+                    .result-stat-box.announced .stat-num {
+                      color: #10b981;
+                    }
+
+                    .result-stat-box.pending .stat-num {
+                      color: #f59e0b;
+                    }
+
+                    .result-stat-box.not-started .stat-num {
+                      color: #94a3b8;
+                    }
+
+                    /* Dark mode for result stat boxes */
+                    body.dark-mode .result-stat-box {
+                      background: #1e2a38 !important;
+                      border-color: #3a4a5c !important;
+                    }
+
+                    body.dark-mode .result-stat-box:hover {
+                      border-color: #6ea4ff !important;
+                      box-shadow: 0 4px 12px rgba(110, 164, 255, 0.2) !important;
+                    }
+
+                    body.dark-mode .result-stat-box .stat-text {
+                      color: #adb5bd !important;
+                    }
+
+                    body.dark-mode .result-ring-container .ring-label {
+                      color: #adb5bd !important;
+                    }
+
+                    .view-results-btn {
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      gap: 0.5rem;
+                      width: 100%;
+                      padding: 0.75rem 1rem;
+                      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+                      color: white;
+                      border: none;
+                      border-radius: 10px;
+                      font-size: 0.875rem;
+                      font-weight: 600;
+                      text-decoration: none;
+                      transition: all 0.3s ease;
+                      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+                    }
+
+                    .view-results-btn:hover {
+                      transform: translateY(-2px);
+                      box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+                      color: white;
+                    }
+
+                    .view-results-btn i {
+                      transition: transform 0.3s ease;
+                    }
+
+                    .view-results-btn:hover i {
+                      transform: translateX(4px);
+                    }
+
+                    @keyframes pulse-ring {
+
+                      0%,
+                      100% {
+                        opacity: 1;
+                      }
+
+                      50% {
+                        opacity: 0.7;
+                      }
+                    }
+
+                    .competition-results-card:hover .ring-progress {
+                      animation: pulse-ring 2s ease-in-out infinite;
+                    }

@@ -1,0 +1,65 @@
+
+    .glass-card {
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+    }
+
+    .bg-soft-success {
+        background-color: rgba(16, 185, 129, 0.1);
+    }
+
+    .hover-shadow:hover {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    /* Responsive Banner Positioning */
+    #cookie-consent-banner {
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 95%;
+        max-width: 450px;
+    }
+
+    @media (min-width: 768px) {
+        #cookie-consent-banner {
+            left: auto;
+            right: 24px;
+            bottom: 24px;
+            transform: none;
+            width: auto;
+            min-width: 350px;
+            max-width: 500px;
+        }
+    }
+
+    /* Dark Mode Support */
+    body.dark-mode #cookie-consent-banner {
+        background: rgba(30, 41, 59, 0.95) !important;
+        border-color: rgba(255, 255, 255, 0.05) !important;
+    }
+
+    body.dark-mode #cookie-consent-banner .text-dark {
+        color: #e2e8f0 !important;
+    }
+
+    body.dark-mode #cookieSettingsModal .modal-content,
+    body.dark-mode #cookieSettingsModal .modal-header,
+    body.dark-mode #cookieSettingsModal .modal-footer,
+    body.dark-mode #cookieSettingsModal .list-group-item {
+        background-color: #1e293b !important;
+        color: #fff !important;
+        border-color: rgba(255, 255, 255, 0.05) !important;
+    }
+
+    body.dark-mode #cookieSettingsModal .text-dark {
+        color: #f1f5f9 !important;
+    }
+
+    body.dark-mode #cookieSettingsModal .text-muted {
+        color: #94a3b8 !important;
+    }
+
+    body.dark-mode #cookieSettingsModal .btn-close {
+        filter: invert(1) grayscale(100%) brightness(200%);
+    }

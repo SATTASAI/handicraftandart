@@ -1,5 +1,6 @@
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { readFile } from "node:fs/promises";
+import { portalAssetPath } from "../server/index.js";
 export function devApi() {
   return {
     name: "local-d1",
@@ -69,6 +70,8 @@ export function devApi() {
           await db.exec(await readFile("migrations/" + file, "utf8"));
       server.middlewares.use(async (req, res, next) => {
         let documentPath = (req.url || "").split("?")[0];
+        const portal = portalAssetPath(documentPath);
+        if (portal) req.url = portal;
         try {
           for (let i = 0; i < 3; i++) {
             const next = decodeURIComponent(documentPath);

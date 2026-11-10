@@ -1,0 +1,22 @@
+[hidden] { display: none !important; }
+
+.reference-art { position: absolute; z-index: 2; right: .65rem; bottom: .5rem; border-radius: 1rem; padding: .13rem .55rem; font-size: .65rem; color: #364255; background: #ffffffe0; pointer-events: none; }
+.activity-card .btn-xs { font-size: .75rem; padding: .25rem; }
+.menu-group-header[role='button']:focus-visible { outline: 2px solid #4b63bf; }
+.cookie-banner .btn { white-space: nowrap; }
+body[data-page='form'] #dynamic-content { max-width: 1024px; margin-inline: auto; }
+body[data-page='result'] { font-family: Prompt, sans-serif; }
+
+@media (max-width: 767.98px) {
+  body[data-page='home'] #main .mb-4:has(> #portalCarousel),
+  body[data-page='home'] .announcement-bar { margin-bottom: 15px !important; }
+}
+
+@media print {
+  #header, footer, .cookie-banner, .pagetitle nav, .card-header { display: none !important; }
+  #main { padding: 0 !important; margin: 0 !important; }
+  .card { box-shadow: none !important; border: 0 !important; }
+  .table-responsive { overflow: visible !important; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
+}

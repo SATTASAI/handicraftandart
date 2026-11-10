@@ -1,0 +1,4 @@
+#cookie-consent-banner.show-consent { display: block !important; }
+.scrolling-text { animation-play-state: running; }
+body[data-page="home"] .reference-art { color: #364255; }
+.login-form [role="alert"] { border-radius: 8px; padding: 8px 12px; background: #fff1f1; }

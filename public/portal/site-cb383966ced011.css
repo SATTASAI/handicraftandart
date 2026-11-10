@@ -1,0 +1,222 @@
+
+    /* ========== Portal Sidebar Styling ========== */
+    .sidebar-card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
+      overflow: hidden;
+    }
+
+    .sidebar-section-title {
+      background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+      color: #495057;
+      margin: 0;
+      padding: 12px 16px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid #e9ecef;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    }
+
+    .sidebar-section-title i {
+      font-size: 0.95rem;
+      color: #6c757d;
+    }
+
+    /* Add spacing between title and content */
+    .sidebar-card .px-4.pb-4 {
+      padding-top: 16px !important;
+    }
+
+    .sidebar-card .p-3 {
+      padding-top: 12px !important;
+    }
+
+    .side-menu-list {
+      padding: 12px 0;
+    }
+
+    .side-menu-link {
+      display: flex;
+      align-items: center;
+      padding: 12px 20px;
+      color: #334155;
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: all 0.2s ease;
+      border-left: 3px solid transparent;
+    }
+
+    .side-menu-link:hover {
+      background: linear-gradient(90deg, rgba(102, 126, 234, 0.08) 0%, transparent 100%);
+      color: #667eea;
+      border-left-color: #667eea;
+      padding-left: 24px;
+    }
+
+    .side-menu-link.active {
+      background: linear-gradient(90deg, rgba(102, 126, 234, 0.12) 0%, transparent 100%);
+      color: #667eea;
+      border-left-color: #667eea;
+      font-weight: 600;
+    }
+
+    .side-menu-link i {
+      width: 20px;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+
+    .side-menu-heading {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #64748b;
+      padding: 8px 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .side-menu-heading i {
+      font-size: 0.85rem;
+    }
+
+    /* Collapsible Menu Styles */
+    .side-menu-accordion {
+      padding: 8px;
+    }
+
+    .menu-group {
+      margin-bottom: 4px;
+    }
+
+    .menu-group-header {
+      display: flex;
+      align-items: center;
+      padding: 10px 12px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #334155;
+      cursor: pointer;
+      border-radius: 8px;
+      transition: all 0.2s ease;
+      background: #f8fafc;
+    }
+
+    .menu-group-header:hover {
+      background: linear-gradient(90deg, rgba(102, 126, 234, 0.1) 0%, transparent 100%);
+      color: #667eea;
+    }
+
+    .menu-group-header .chevron-icon {
+      transition: transform 0.3s ease;
+    }
+
+    .menu-group-header:not(.collapsed) .chevron-icon {
+      transform: rotate(180deg);
+    }
+
+    .side-menu-link.sub {
+      padding: 8px 12px 8px 32px;
+      font-size: 0.8rem;
+      background: transparent;
+    }
+
+    .side-menu-link.sub:hover {
+      padding-left: 36px;
+    }
+
+    .side-menu-link.sub i {
+      font-size: 0.5rem;
+      opacity: 0.6;
+    }
+
+    /* Main Section Header */
+    .main-section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .main-section-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #1a202c;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0;
+    }
+
+    .main-section-title i {
+      color: var(--primary-color, #667eea);
+    }
+
+    /* Stats in sidebar */
+    .stats-list .d-flex {
+      font-size: 14px;
+    }
+
+    /* Result Progress Circle */
+    .result-progress-container {
+      display: flex;
+      justify-content: center;
+    }
+
+    .result-progress-circle {
+      position: relative;
+      width: 120px;
+      height: 120px;
+    }
+
+    .progress-svg {
+      transform: rotate(-90deg);
+      width: 100%;
+      height: 100%;
+    }
+
+    .progress-svg circle {
+      fill: none;
+      stroke-width: 8;
+      stroke-linecap: round;
+    }
+
+    .progress-svg circle.bg {
+      stroke: #e9ecef;
+    }
+
+    .progress-svg circle.bar {
+      stroke: #28a745;
+      stroke-dasharray: 283;
+      transition: stroke-dashoffset 0.8s ease;
+    }
+
+    .progress-label {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+    }
+
+    .progress-label .percentage {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #28a745;
+    }
+
+    /* News Card Styling */
+    .news-card {
+      background: #fff;
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .news-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
+    }

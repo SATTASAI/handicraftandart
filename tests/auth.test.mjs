@@ -3,7 +3,17 @@ import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { digest, now } from "../server/security.js";
+import worker from "../server/index.js";
 const origin = "https://accounts.example.test";
+test("the Sites layout is served for home and login while workspace routes retain the app", async () => {
+  const env = { ASSETS: { fetch: (request) => new Response(new URL(request.url).pathname) } };
+  for (const [url, asset] of [["/", "/portal/home.html"], ["/login", "/portal/login.html"], ["/workspace", "/workspace"]]) {
+    const response = await worker.fetch(new Request(origin + url), env);
+    assert.equal(await response.text(), asset);
+    assert.match(response.headers.get("content-security-policy"), /style-src 'self';/);
+  }
+  assert.equal((await worker.fetch(new Request(origin + "/rules/example.pdf"), env)).status, 401);
+});
 async function runtime(t, extra = {}) {
   const mf = new Miniflare(
     convertV4MiniflareOptions({

@@ -1,0 +1,235 @@
+
+/* ========================================
+Custom Theme CSS - Generated from Database
+======================================== */
+
+/* Font Import - Must be first */
+
+
+/* Root Variables */
+:root {
+--primary-color: #012970;
+--secondary-color: #4154f1;
+--text-color: #444444;
+--menu-bg-color: #ffffff;
+--menu-text-color: #012970;
+--menu-hover-bg: #f6f9ff;
+--menu-active-bg: #f6f9ff;
+--header-bg-color: #ffffff;
+--header-text-color: #012970;
+--footer-bg-color: #f6f9ff;
+--footer-text-color: #444444;
+--font-family: 'Prompt', sans-serif;
+}
+
+/* Global Font - OVERRIDE ALL */
+* {
+font-family: 'Prompt', sans-serif !important;
+}
+
+/* Exclude icon fonts - IMPORTANT: Must override the universal selector */
+i,
+i[class*="bi"],
+.bi,
+[class*="bi-"],
+[class*="fa"],
+[class*="fa-"],
+[class*="icon"],
+.iconify,
+.material-icons,
+.glyphicon {
+font-family: "bootstrap-icons" !important;
+}
+
+/* Font Awesome specific */
+[class*="fa-"] {
+font-family: "Font Awesome 5 Free", "Font Awesome 5 Brands" !important;
+}
+
+body {
+color: #444444;
+}
+
+/* Header Styling */
+body:not(.dark-mode) #header {
+background: #ffffff !important;
+}
+
+body:not(.dark-mode) #header .logo .sitename,
+body:not(.dark-mode) #header .logo,
+body:not(.dark-mode) #header a {
+color: #012970 !important;
+}
+
+body:not(.dark-mode) .header-nav .nav-profile .dropdown-toggle {
+color: #012970 !important;
+}
+
+/* Sidebar Menu */
+body:not(.dark-mode) .sidebar {
+background: #ffffff !important;
+}
+
+/* Nav Link - Default (Collapsed) */
+body:not(.dark-mode) .sidebar-nav .nav-link.collapsed {
+background: #ffffff !important;
+color: #012970 !important;
+}
+
+body:not(.dark-mode) .sidebar-nav .nav-link.collapsed i {
+color: #899bbd !important;
+}
+
+/* Nav Link - Active (Not Collapsed) */
+body:not(.dark-mode) .sidebar-nav .nav-link {
+background: #f6f9ff !important;
+color: #4154f1 !important;
+}
+
+body:not(.dark-mode) .sidebar-nav .nav-link i {
+color: #4154f1 !important;
+}
+
+/* Nav Link - Hover */
+body:not(.dark-mode) .sidebar-nav .nav-link:hover {
+background: #f6f9ff !important;
+color: #4154f1 !important;
+}
+
+body:not(.dark-mode) .sidebar-nav .nav-link:hover i {
+color: #4154f1 !important;
+}
+
+/* Nav Heading */
+body:not(.dark-mode) .sidebar-nav .nav-heading {
+color: #899bbd !important;
+}
+
+/* Nav Content - Sub Menu */
+body:not(.dark-mode) .sidebar-nav .nav-content a {
+color: #012970 !important;
+}
+
+body:not(.dark-mode) .sidebar-nav .nav-content a i {
+border-radius: 50%;
+}
+
+body:not(.dark-mode) .sidebar-nav .nav-content a:hover,
+body:not(.dark-mode) .sidebar-nav .nav-content a.active {
+color: #4154f1 !important;
+}
+
+body:not(.dark-mode) .sidebar-nav .nav-content a.active i {
+background-color: #4154f1 !important;
+}
+
+/* Primary Color Elements */
+body:not(.dark-mode) .btn-primary {
+background-color: #012970 !important;
+border-color: #012970 !important;
+color: #ffffff !important;
+}
+
+body:not(.dark-mode) .btn-primary:hover {
+background-color: #4154f1 !important;
+border-color: #4154f1 !important;
+color: #ffffff !important;
+}
+
+body:not(.dark-mode) a {
+color: #012970;
+}
+
+body:not(.dark-mode) a:hover {
+color: #4154f1;
+}
+
+body:not(.dark-mode) .text-primary {
+color: #012970 !important;
+}
+
+body:not(.dark-mode) .bg-primary {
+background-color: #012970 !important;
+}
+
+/* Badges */
+body:not(.dark-mode) .badge.bg-primary {
+background-color: #012970 !important;
+}
+
+/* Breadcrumb Links */
+.breadcrumb-item a {
+color: #012970;
+}
+
+.breadcrumb-item.active {
+color: #444444;
+}
+
+/* Footer */
+body:not(.dark-mode) #footer {
+background: #f6f9ff !important;
+color: #444444 !important;
+}
+
+body:not(.dark-mode) #footer a {
+color: #012970 !important;
+}
+
+/* Form Controls Focus */
+.form-control:focus,
+.form-select:focus {
+border-color: #012970;
+box-shadow: 0 0 0 0.25rem rgba(1, 41, 112, 0.25);
+}
+
+/* Table Headers */
+body:not(.dark-mode) .table thead th {
+background-color: #012970;
+color: #ffffff;
+}
+
+/* Pagination */
+
+
+body:not(.dark-mode) .pagination .page-item.active .page-link {
+background-color: #012970;
+border-color: #012970;
+}
+
+/* Modal Headers */
+body:not(.dark-mode) .modal-header {
+background-color: #012970;
+color: #ffffff;
+}
+
+body:not(.dark-mode) .modal-header .btn-close {
+filter: brightness(0) invert(1);
+}
+
+/* Progress Bars */
+.progress-bar {
+background-color: #012970;
+}
+
+/* Nav Pills */
+.nav-pills .nav-link.active {
+background-color: #012970;
+}
+
+/* Alerts */
+.alert-primary {
+background-color: rgba(1, 41, 112, 0.1);
+border-color: #012970;
+color: #012970;
+}
+
+/* Custom Scrollbar */
+.sidebar::-webkit-scrollbar-thumb {
+background-color: #012970;
+}
+
+/* Dashboard Cards */
+.dashboard .card-icon {
+background-color: #012970;
+}

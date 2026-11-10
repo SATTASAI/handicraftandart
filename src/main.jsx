@@ -1,18 +1,22 @@
 import CompetitionRegistration from "./components/CompetitionRegistration";
 import Icon from "./components/Icon";
-import CompetitionPortal, { networkName, PortalHeader } from "./components/CompetitionPortal";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { api } from "./api";
 import "./styles.css";
 const labels = { coach: "ผู้ฝึกซ้อม", judge: "กรรมการ", organizer: "ผู้จัด" };
 function go(path) {
+  if (path === "/" || path.startsWith("/login")) {
+    location.assign(path);
+    return;
+  }
   history.pushState({}, "", path);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
-function afterAuth() {
-  return ["#competitions", "#results", "#certificates"].includes(location.hash)
-    ? `/${location.hash}` : "/";
+function signInPath() {
+  const hash = location.hash;
+  return sectionList.some((section) => `#${section.key}` === hash)
+    ? `/login${hash}` : "/login";
 }
 function Link({ to, children, ...props }) {
   return (
@@ -97,7 +101,7 @@ function Auth({ signup, onUser }) {
     try {
       const result = await api(signup ? "/signup" : "/login", data);
       onUser(result.user);
-      go(afterAuth());
+      go("/");
     } catch (e) {
       setError(e.message);
     } finally {
@@ -848,10 +852,66 @@ function InstallCard() {
   );
 }
 function Home({ user, sections, onTab }) {
+  const r = rolesOf(user);
+  const tiles = sections.filter((s) => s.hint);
   return (
-    <CompetitionPortal user={user} sections={sections} onTab={onTab}>
+    <div className="home">
+      <section className="hello-card">
+        <p className="hello-school">{user.school}</p>
+        <h1>สวัสดี คุณ{user.name}</h1>
+        <div className="badges">
+          {r.admin && <span className="badge super">superadmin</span>}
+          {user.roles.map((role) => (
+            <span className="badge" key={role}>
+              {labels[role]}
+            </span>
+          ))}
+        </div>
+        {r.coach && (
+          <button className="primary" onClick={() => onTab("competitions")}>
+            ลงทะเบียนนักเรียน
+          </button>
+        )}
+      </section>
       <InstallCard />
-    </CompetitionPortal>
+      <h2 className="group-title">เมนูของคุณ</h2>
+      <div className="tile-grid">
+        {tiles
+          .filter((s) => !s.admin)
+          .map((s) => (
+            <button className="tile" key={s.key} onClick={() => onTab(s.key)}>
+              <span className="tile-icon" aria-hidden="true">
+                <Icon name={s.icon} />
+              </span>
+              <strong>{s.label}</strong>
+              <small>{s.hint}</small>
+            </button>
+          ))}
+      </div>
+      {r.admin && (
+        <>
+          <h2 className="group-title">ผู้ดูแลระบบ</h2>
+          <ul className="list-group">
+            {tiles
+              .filter((s) => s.admin)
+              .map((s) => (
+                <li key={s.key}>
+                  <button className="list-row" onClick={() => onTab(s.key)}>
+                    <span className="tile-icon" aria-hidden="true">
+                      <Icon name={s.icon} />
+                    </span>
+                    <span className="list-main">
+                      <strong>{s.label}</strong>
+                      <small>{s.hint}</small>
+                    </span>
+                    <Icon name="chevron" size={18} />
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </>
+      )}
+    </div>
   );
 }
 function Account({ user, onLogout, busy }) {
@@ -924,8 +984,12 @@ function Shell({ user, onLogout, busy }) {
   }, [current.key]);
   function navigate(key) {
     sheet.current?.close();
+    if (key === "home") {
+      go("/");
+      return;
+    }
     if (key !== tab) {
-      history.pushState({}, "", key === "home" ? location.pathname : "#" + key);
+        history.pushState({}, "", `/workspace#${key}`);
       setTab(key);
     }
     window.scrollTo({ top: 0 });
@@ -955,10 +1019,9 @@ function Shell({ user, onLogout, busy }) {
   );
   const userSections = sections.filter((s) => !s.admin && s.key !== "account");
   const adminSections = sections.filter((s) => s.admin);
-  const portalHome = current.key === "home";
   return (
-    <div className={portalHome ? "app-shell portal-shell" : "app-shell"}>
-      {!portalHome && <aside className="sidebar" aria-label="เมนูหลัก">
+    <div className="app-shell">
+      <aside className="sidebar" aria-label="เมนูหลัก">
         <div className="sidebar-brand">
           <span className="brand-mark" aria-hidden="true">
             ศ
@@ -990,9 +1053,9 @@ function Shell({ user, onLogout, busy }) {
             <small>บัญชีของฉัน</small>
           </span>
         </a>
-      </aside>}
+      </aside>
       <div className="app-main">
-        {portalHome ? <PortalHeader user={user} onTab={navigate} /> : <header className="app-bar">
+        <header className="app-bar">
           <span className="brand-mark" aria-hidden="true">
             ศ
           </span>
@@ -1009,8 +1072,8 @@ function Shell({ user, onLogout, busy }) {
               {user.name.trim().charAt(0)}
             </span>
           </button>
-        </header>}
-        <main id="main" tabIndex={-1} className={portalHome ? "portal-public" : "screen"}>
+        </header>
+        <main id="main" tabIndex={-1} className="screen">
           {current.key === "home" ? (
             <Home user={user} sections={sections} onTab={navigate} />
           ) : current.key === "account" ? (
@@ -1097,7 +1160,7 @@ function App() {
     const route = () => setPath(location.pathname),
       expired = () => {
         setUser(null);
-        go("/login");
+        go(signInPath());
       };
     window.addEventListener("popstate", route);
     window.addEventListener("auth-expired", expired);
@@ -1114,11 +1177,11 @@ function App() {
       "/forgot-password",
       "/reset-password",
     ];
-    if (user && publicPaths.includes(path)) go(afterAuth());
-    if (!user && path !== "/" && !publicPaths.includes(path)) go("/login");
+    if (user && publicPaths.includes(path)) go("/");
+    if (!user && !publicPaths.includes(path)) go(signInPath());
     if (!user)
       document.title =
-        (path === "/" ? networkName : path === "/signup" ? "สมัครบัญชี" : "เข้าสู่ระบบ") + " · ศิลปหัตถกรรม";
+        (path === "/signup" ? "สมัครบัญชี" : "เข้าสู่ระบบ") + " · ศิลปหัตถกรรม";
   }, [path, user, ready, error]);
   async function logout() {
     if (busy) return;
@@ -1153,19 +1216,8 @@ function App() {
         <Shell user={user} onLogout={logout} busy={busy} />
       </>
     );
-  if (path === "/" && !user)
-    return (
-      <>
-        <a className="skip" href="#main">ข้ามไปเนื้อหา</a>
-        <PortalHeader />
-        <main id="main" className="portal-public"><CompetitionPortal /></main>
-        <footer className="portal-footer">{networkName}</footer>
-      </>
-    );
   return (
-    <>
-      <PortalHeader />
-      <main id="main" className="public-screen">
+    <main id="main" className="public-screen">
       {!ready ? (
         <div className="splash" role="status">
           <span className="brand-mark" aria-hidden="true">
@@ -1187,8 +1239,7 @@ function App() {
       ) : (
         <Auth key={path} signup={path === "/signup"} onUser={setUser} />
       )}
-      </main>
-    </>
+    </main>
   );
 }
 createRoot(document.getElementById("root")).render(<App />);

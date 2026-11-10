@@ -33,6 +33,11 @@ const cookieName = (r) =>
   new URL(r.url).protocol === "https:" ? "__Host-ha_session" : "ha_session";
 const sessionCookie = (r, token, age = 604800) =>
   `${cookieName(r)}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${age}${new URL(r.url).protocol === "https:" ? "; Secure" : ""}`;
+export function portalAssetPath(pathname) {
+  if (pathname === "/" || pathname === "/index.php") return "/portal/home.html";
+  if (pathname === "/login" || pathname === "/login.html") return "/portal/login.html";
+  return null;
+}
 async function body(r, maximum = 16384) {
   if (
     !(r.headers.get("content-type") || "")
@@ -138,6 +143,7 @@ async function api(r, env, ctx) {
         (SELECT COUNT(*) FROM event_competitions) AS activities,
         (SELECT COUNT(*) FROM event_competitions WHERE registration_open=1) AS open_activities,
         (SELECT COUNT(*) FROM event_registrations WHERE status='approved') AS teams,
+        (SELECT COUNT(DISTINCT owner_id) FROM event_registrations WHERE status='approved') AS coaches,
         (SELECT COUNT(*) FROM event_students s JOIN event_registrations r ON r.id=s.registration_id WHERE r.status='approved') AS students,
         (SELECT COUNT(DISTINCT s.school) FROM event_students s JOIN event_registrations r ON r.id=s.registration_id WHERE r.status='approved') AS schools,
         (SELECT COUNT(DISTINCT judge_id) FROM event_judges) AS judges
@@ -525,7 +531,9 @@ export default {
   async fetch(r, env, ctx) {
     let response;
     try {
-      let decodedPath = new URL(r.url).pathname;
+      const url = new URL(r.url);
+      const portal = portalAssetPath(url.pathname);
+      let decodedPath = url.pathname;
       try {
         for (let i = 0; i < 3; i++) {
           const next = decodeURIComponent(decodedPath);
@@ -545,9 +553,9 @@ export default {
         headers.set("X-Robots-Tag", "noindex, noarchive");
         response = new Response(asset.body, { status: asset.status, headers });
       } else
-        response = new URL(r.url).pathname.startsWith("/api/")
+        response = url.pathname.startsWith("/api/")
           ? await api(r, env)
-          : await env.ASSETS.fetch(r);
+          : await env.ASSETS.fetch(portal ? new Request(new URL(portal, url), r) : r);
     } catch (error) {
       response = json(
         {
