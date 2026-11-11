@@ -411,3 +411,85 @@ test("forgot password reports unavailable when Resend is not configured", async 
     503,
   );
 });
+
+test("passkey sign-in, account lockout, signed-in devices and login log", async (t) => {
+  const { db, request } = await runtime(t);
+  const admin = await request("/signup", account("pk-admin@example.test", ["coach"]));
+  const user = await request("/signup", account("pk-user@example.test", ["coach"]));
+  const b64 = (bytes) => Buffer.from(bytes).toString("base64url");
+  const text = new TextEncoder();
+  const generate = () => crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const keys = await generate();
+  const spki = b64(await crypto.subtle.exportKey("spki", keys.publicKey));
+  const credentialId = crypto.getRandomValues(new Uint8Array(16));
+  const id = b64(credentialId);
+  const rpHash = new Uint8Array(await crypto.subtle.digest("SHA-256", text.encode(new URL(origin).hostname)));
+  const clientData = (type, challenge, from = origin) => text.encode(JSON.stringify({ type, challenge, origin: from }));
+  // A software authenticator: user present + verified, with attested credential data on creation.
+  const attested = new Uint8Array([...rpHash, 0x45, 0, 0, 0, 0, ...new Uint8Array(16), 0, 16, ...credentialId]);
+  assert.equal((await request("/passkey/register/options", {})).status, 401);
+  const options = await request("/passkey/register/options", {}, user.cookie);
+  assert.equal(options.status, 200, JSON.stringify(options.body));
+  const registration = (from) => ({
+    id, public_key: spki, alg: -7, name: "iPhone",
+    client_data: b64(clientData("webauthn.create", options.body.challenge, from)),
+    authenticator_data: b64(attested),
+  });
+  assert.equal((await request("/passkey/register", registration("https://evil.example.test"), user.cookie)).status, 400);
+  const saved = await request("/passkey/register", registration(), user.cookie);
+  assert.equal(saved.status, 201, JSON.stringify(saved.body));
+  assert.equal(saved.body.passkeys.length, 1);
+  assert.equal((await request("/passkey/register", registration(), user.cookie)).status, 400);
+
+  const der = (raw) => {
+    const part = (value) => {
+      let start = 0;
+      while (start < 31 && value[start] === 0) start++;
+      value = [...value.slice(start)];
+      if (value[0] & 0x80) value.unshift(0);
+      return [2, value.length, ...value];
+    };
+    const body = [...part(raw.slice(0, 32)), ...part(raw.slice(32))];
+    return new Uint8Array([0x30, body.length, ...body]);
+  };
+  const assertion = async (challenge, key = keys.privateKey) => {
+    const client = clientData("webauthn.get", challenge);
+    const auth = new Uint8Array([...rpHash, 0x05, 0, 0, 0, 1]);
+    const signed = new Uint8Array([...auth, ...new Uint8Array(await crypto.subtle.digest("SHA-256", client))]);
+    const raw = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, signed));
+    return { id, client_data: b64(client), authenticator_data: b64(auth), signature: b64(der(raw)) };
+  };
+  const challenge = async () => (await request("/passkey/login/options", {})).body.challenge;
+  const passkeyLogin = async (...args) => request("/passkey/login", await assertion(...args));
+  assert.equal((await passkeyLogin(await challenge(), (await generate()).privateKey)).status, 401);
+  assert.equal((await passkeyLogin("never-issued")).status, 401);
+  const issued = await challenge();
+  const login = await passkeyLogin(issued);
+  assert.equal(login.status, 200, JSON.stringify(login.body));
+  assert.equal(login.body.user.email, "pk-user@example.test");
+  assert.equal((await passkeyLogin(issued)).status, 401);
+
+  const sessions = await request("/sessions", undefined, login.cookie);
+  assert.equal(sessions.body.sessions.length, 2);
+  assert.equal(sessions.body.sessions[0].current, true);
+  assert.equal(sessions.body.sessions[0].method, "passkey");
+  assert.equal((await request("/sessions/revoke", { others: true }, login.cookie)).status, 200);
+  assert.equal((await request("/me", undefined, user.cookie)).body.user, null);
+  assert.equal((await request("/me", undefined, login.cookie)).body.user.email, "pk-user@example.test");
+
+  const attempt = (password) => request("/login", { email: "pk-user@example.test", password });
+  for (let i = 0; i < 8; i++) assert.equal((await attempt("wrong-password-" + i)).status, 401);
+  assert.equal((await attempt(account().password)).status, 429);
+  assert.equal((await passkeyLogin(await challenge())).status, 200);
+  await db.prepare("DELETE FROM account_limits").run();
+  assert.equal((await attempt(account().password)).status, 200);
+
+  const log = await request("/admin/console/logins", undefined, admin.cookie);
+  assert.equal(log.status, 200, JSON.stringify(log.body));
+  assert.ok(log.body.logins.some((row) => row.method === "passkey" && row.ok === 1));
+  assert.ok(log.body.logins.some((row) => row.reason === "locked"));
+  assert.equal((await request("/admin/console/logins", undefined, login.cookie)).status, 403);
+  assert.equal((await request("/passkey/delete", { id }, login.cookie)).body.passkeys.length, 0);
+  assert.equal((await passkeyLogin(await challenge())).status, 401);
+  assert.equal((await request("/setup")).body.turnstile_site_key, null);
+});

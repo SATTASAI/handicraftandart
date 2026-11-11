@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS account_session_info (token_hash TEXT PRIMARY KEY REFERENCES account_sessions(token_hash) ON DELETE CASCADE,created_at INTEGER NOT NULL,ip TEXT NOT NULL DEFAULT '',user_agent TEXT NOT NULL DEFAULT '',method TEXT NOT NULL DEFAULT 'password');
+CREATE TABLE IF NOT EXISTS account_passkeys (id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES account_users(id) ON DELETE CASCADE,public_key TEXT NOT NULL,alg INTEGER NOT NULL CHECK(alg IN (-7,-257)),name TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL,last_used_at INTEGER);
+CREATE INDEX IF NOT EXISTS account_passkeys_user ON account_passkeys(user_id);
+CREATE TABLE IF NOT EXISTS account_challenges (challenge TEXT PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN ('register','login')),user_id TEXT REFERENCES account_users(id) ON DELETE CASCADE,expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS account_login_log (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT,email TEXT NOT NULL DEFAULT '',ok INTEGER NOT NULL CHECK(ok IN (0,1)),method TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',ip TEXT NOT NULL DEFAULT '',user_agent TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS account_login_log_time ON account_login_log(created_at);

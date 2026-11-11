@@ -259,6 +259,15 @@ export async function adminApi(request, env, user, { body, json, fail }) {
     }
     return json({ ok: true });
   }
+  if (route === "logins" && method === "GET") {
+    return json({
+      logins: await all(
+        db,
+        `SELECT l.id,l.email,l.ok,l.method,l.reason,l.ip,l.user_agent,l.created_at,u.name FROM account_login_log l
+        LEFT JOIN account_users u ON u.id=l.user_id ORDER BY l.id DESC LIMIT 300`,
+      ),
+    });
+  }
   if (route === "portal" && method === "GET") {
     const row = await db.prepare("SELECT value FROM app_settings WHERE key=?").bind(PORTAL_KEY).first();
     return json({ content: row ? JSON.parse(row.value) : {} });

@@ -21,6 +21,10 @@ import {
   hashPassword,
   verifyPassword,
   publicUser,
+  toBase64Url,
+  passkeyKey,
+  passkeyResponse,
+  passkeySignatureValid,
 } from "./security.js";
 class ApiError extends Error {
   constructor(status, message) {
@@ -85,20 +89,72 @@ async function body(r, maximum = 16384) {
     fail(400, "ข้อมูลไม่ถูกต้อง");
   }
 }
-async function currentUser(r, db) {
+async function sessionHash(r) {
   const token = (r.headers.get("cookie") || "")
     .split(";")
     .map((x) => x.trim())
     .find((x) => x.startsWith(cookieName(r) + "="))
     ?.slice(cookieName(r).length + 1);
-  if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
+  return token && /^[a-f0-9]{64}$/.test(token) ? digest(token) : null;
+}
+async function currentUser(r, db) {
+  const hash = await sessionHash(r);
+  if (!hash) return null;
   return db
     .prepare(
       "SELECT u.* FROM account_sessions s JOIN account_users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?",
     )
-    .bind(await digest(token), now())
+    .bind(hash, now())
     .first();
 }
+const clientIp = (r) => (r.headers.get("CF-Connecting-IP") || "").slice(0, 60);
+const clientAgent = (r) => (r.headers.get("user-agent") || "").slice(0, 300);
+// The session row plus where and how it was opened, for the "signed-in devices" list.
+const sessionStatements = (r, db, hash, userId, method) => [
+  db
+    .prepare("INSERT INTO account_sessions(token_hash,user_id,expires_at) VALUES(?,?,?)")
+    .bind(hash, userId, now() + 604800),
+  db
+    .prepare("INSERT INTO account_session_info(token_hash,created_at,ip,user_agent,method) VALUES(?,?,?,?,?)")
+    .bind(hash, now(), clientIp(r), clientAgent(r), method),
+];
+async function logLogin(db, r, entry) {
+  await db.batch([
+    db
+      .prepare(
+        "INSERT INTO account_login_log(user_id,email,ok,method,reason,ip,user_agent,created_at) VALUES(?,?,?,?,?,?,?,?)",
+      )
+      .bind(
+        entry.user_id || null,
+        String(entry.email || "").slice(0, 254),
+        entry.ok ? 1 : 0,
+        entry.method,
+        entry.reason || "",
+        clientIp(r),
+        clientAgent(r),
+        now(),
+      ),
+    db.prepare("DELETE FROM account_login_log WHERE created_at<?").bind(now() - 90 * 86400),
+  ]);
+}
+// Cloudflare Turnstile is enforced only when both keys are configured.
+const turnstileOn = (env) => Boolean(env.TURNSTILE_SECRET_KEY && env.TURNSTILE_SITE_KEY);
+async function requireHuman(r, env, token) {
+  if (!turnstileOn(env)) return;
+  if (typeof token !== "string" || !token || token.length > 4096)
+    fail(400, "กรุณายืนยันว่าไม่ใช่บอทก่อนดำเนินการ");
+  const data = new URLSearchParams({ secret: env.TURNSTILE_SECRET_KEY, response: token });
+  if (clientIp(r)) data.set("remoteip", clientIp(r));
+  const result = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    body: data,
+  })
+    .then((response) => response.json())
+    .catch(() => ({}));
+  if (!result.success) fail(400, "ยืนยันว่าไม่ใช่บอทไม่สำเร็จ กรุณาลองใหม่");
+}
+const LOCK_AFTER = 8,
+  LOCK_SECONDS = 900;
 async function limit(db, r, action, maximum, seconds, perIp = true) {
   const key = await digest(
     action +
@@ -135,6 +191,7 @@ async function api(r, env, ctx) {
       firstAccountAvailable: !(await db
         .prepare("SELECT id FROM account_bootstrap WHERE id=1")
         .first()),
+      turnstile_site_key: turnstileOn(env) ? env.TURNSTILE_SITE_KEY : null,
     });
   const systemClosed =
     (
@@ -173,6 +230,7 @@ async function api(r, env, ctx) {
     systemClosed &&
     !["/api/login", "/api/logout"].includes(path) &&
     !path.startsWith("/api/password/") &&
+    !path.startsWith("/api/passkey/login") &&
     !(await currentUser(r, db))?.is_superadmin
   )
     fail(503, "ระบบปิดใช้งานชั่วคราว กรุณาติดต่อผู้ดูแลระบบ");
@@ -196,6 +254,7 @@ async function api(r, env, ctx) {
     // Schools share one public IP on network Wi-Fi; keep per-IP limits generous.
     await limit(db, r, "signup", 60, 3600);
     const b = await body(r);
+    await requireHuman(r, env, b.turnstile);
     const name = typeof b.name === "string" ? b.name.trim() : "",
       school = typeof b.school === "string" ? b.school.trim() : "",
       email = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
@@ -225,7 +284,8 @@ async function api(r, env, ctx) {
     const id = crypto.randomUUID(),
       t = now(),
       passwordHash = await hashPassword(b.password),
-      token = random();
+      token = random(),
+      tokenHash = await digest(token);
     try {
       // D1 batch is atomic. The first serialized signup claims the permanent marker.
       await db.batch([
@@ -248,11 +308,7 @@ async function api(r, env, ctx) {
             "INSERT INTO account_bootstrap(id,user_id,created_at) SELECT 1,id,? FROM account_users WHERE id=? AND is_superadmin=1 ON CONFLICT(id) DO NOTHING",
           )
           .bind(t, id),
-        db
-          .prepare(
-            "INSERT INTO account_sessions(token_hash,user_id,expires_at) VALUES(?,?,?)",
-          )
-          .bind(await digest(token), id, t + 604800),
+        ...sessionStatements(r, db, tokenHash, id, "signup"),
       ]);
     } catch (error) {
       if (/UNIQUE constraint failed: account_users.email/i.test(String(error)))
@@ -282,25 +338,197 @@ async function api(r, env, ctx) {
       email.length > 254
     )
       fail(401, "อีเมลหรือรหัสผ่านไม่ถูกต้อง");
+    await requireHuman(r, env, b.turnstile);
     const user = await db
       .prepare("SELECT * FROM account_users WHERE email=?")
       .bind(email)
       .first();
+    // Too many wrong passwords pause this account for everyone, whatever network they come from.
+    const lockKey = await digest("login-fail:" + email);
+    const failures = await db
+      .prepare("SELECT attempts FROM account_limits WHERE key=? AND resets_at>?")
+      .bind(lockKey, now())
+      .first();
+    if (failures?.attempts >= LOCK_AFTER) {
+      await logLogin(db, r, { user_id: user?.id, email, method: "password", reason: "locked" });
+      fail(429, "บัญชีนี้ถูกพักการเข้าสู่ระบบ 15 นาที เพราะใส่รหัสผ่านผิดหลายครั้ง ใช้ Face ID หรือ “ลืมรหัสผ่าน” ได้");
+    }
     const valid = await verifyPassword(
       b.password,
       user?.password_hash ||
         "pbkdf2-sha256$100000$" + "0".repeat(64) + "$" + "0".repeat(64),
     );
-    if (!user || !valid) fail(401, "อีเมลหรือรหัสผ่านไม่ถูกต้อง");
+    if (!user || !valid) {
+      await db
+        .prepare(
+          "INSERT INTO account_limits(key,attempts,resets_at) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=CASE WHEN resets_at<=? THEN 1 ELSE attempts+1 END,resets_at=CASE WHEN resets_at<=? THEN excluded.resets_at ELSE resets_at END",
+        )
+        .bind(lockKey, now() + LOCK_SECONDS, now(), now())
+        .run();
+      await logLogin(db, r, { user_id: user?.id, email, method: "password", reason: "wrong" });
+      fail(401, "อีเมลหรือรหัสผ่านไม่ถูกต้อง");
+    }
     if (systemClosed && !user.is_superadmin) fail(503, "ระบบปิดใช้งานชั่วคราว กรุณาติดต่อผู้ดูแลระบบ");
     const token = random();
-    await db
-      .prepare("INSERT INTO account_sessions VALUES(?,?,?)")
-      .bind(await digest(token), user.id, now() + 604800)
-      .run();
+    await db.batch([
+      ...sessionStatements(r, db, await digest(token), user.id, "password"),
+      db.prepare("DELETE FROM account_limits WHERE key=?").bind(lockKey),
+    ]);
+    await logLogin(db, r, { user_id: user.id, email, ok: true, method: "password" });
     return json({ user: publicUser(user) }, 200, {
       "Set-Cookie": sessionCookie(r, token),
     });
+  }
+  if (path === "/api/passkey/login/options" && r.method === "POST") {
+    await limit(db, r, "passkey-options", 120, 900);
+    const challenge = toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+    await db.batch([
+      db.prepare("DELETE FROM account_challenges WHERE expires_at<?").bind(now()),
+      db
+        .prepare("INSERT INTO account_challenges(challenge,kind,expires_at) VALUES(?,'login',?)")
+        .bind(challenge, now() + 300),
+    ]);
+    return json({ challenge, rpId: new URL(r.url).hostname, userVerification: "required", timeout: 60000 });
+  }
+  if (path === "/api/passkey/login" && r.method === "POST") {
+    await limit(db, r, "passkey-login", 120, 900);
+    const b = await body(r);
+    const denied = async (reason, userId) => {
+      await logLogin(db, r, { user_id: userId, method: "passkey", reason });
+      fail(401, "เข้าสู่ระบบด้วย Face ID ไม่สำเร็จ กรุณาลองใหม่หรือใช้รหัสผ่าน");
+    };
+    const response = await passkeyResponse(
+      "webauthn.get",
+      new URL(r.url).origin,
+      b.client_data,
+      b.authenticator_data,
+    );
+    if (!response || typeof b.id !== "string") await denied("invalid");
+    // Each challenge works once and only for five minutes.
+    const claimed = await db
+      .prepare(
+        "DELETE FROM account_challenges WHERE challenge=? AND kind='login' AND expires_at>? RETURNING challenge",
+      )
+      .bind(response.challenge, now())
+      .all();
+    if (!claimed.results.length) await denied("challenge");
+    const passkey = await db.prepare("SELECT * FROM account_passkeys WHERE id=?").bind(b.id).first();
+    if (!passkey) await denied("unknown");
+    const key = await passkeyKey(passkey.public_key, passkey.alg);
+    if (!key || !(await passkeySignatureValid(key, passkey.alg, response, b.signature)))
+      await denied("signature", passkey.user_id);
+    const user = await db.prepare("SELECT * FROM account_users WHERE id=?").bind(passkey.user_id).first();
+    if (systemClosed && !user.is_superadmin) fail(503, "ระบบปิดใช้งานชั่วคราว กรุณาติดต่อผู้ดูแลระบบ");
+    const token = random();
+    await db.batch([
+      ...sessionStatements(r, db, await digest(token), user.id, "passkey"),
+      db.prepare("UPDATE account_passkeys SET last_used_at=? WHERE id=?").bind(now(), passkey.id),
+    ]);
+    await logLogin(db, r, { user_id: user.id, email: user.email, ok: true, method: "passkey" });
+    return json({ user: publicUser(user) }, 200, { "Set-Cookie": sessionCookie(r, token) });
+  }
+  if (path.startsWith("/api/passkey") || path.startsWith("/api/sessions")) {
+    const user = await currentUser(r, db);
+    if (!user) fail(401, "กรุณาเข้าสู่ระบบ");
+    const origin = new URL(r.url).origin;
+    const passkeys = async () =>
+      (
+        await db
+          .prepare("SELECT id,name,created_at,last_used_at FROM account_passkeys WHERE user_id=? ORDER BY created_at")
+          .bind(user.id)
+          .all()
+      ).results;
+    if (path === "/api/passkeys" && r.method === "GET") return json({ passkeys: await passkeys() });
+    if (path === "/api/passkey/register/options" && r.method === "POST") {
+      const existing = await passkeys();
+      if (existing.length >= 10) fail(409, "บัญชีนี้ลงทะเบียน Face ID ครบ 10 อุปกรณ์แล้ว ลบอุปกรณ์เดิมก่อน");
+      const challenge = toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+      await db.batch([
+        db.prepare("DELETE FROM account_challenges WHERE expires_at<? OR (user_id=? AND kind='register')").bind(now(), user.id),
+        db
+          .prepare("INSERT INTO account_challenges(challenge,kind,user_id,expires_at) VALUES(?,'register',?,?)")
+          .bind(challenge, user.id, now() + 300),
+      ]);
+      return json({
+        challenge,
+        rp: { name: "ศิลปหัตถกรรม", id: new URL(r.url).hostname },
+        user: { id: toBase64Url(new TextEncoder().encode(user.id)), name: user.email, displayName: user.name },
+        pubKeyCredParams: [
+          { type: "public-key", alg: -7 },
+          { type: "public-key", alg: -257 },
+        ],
+        authenticatorSelection: { residentKey: "required", userVerification: "required" },
+        attestation: "none",
+        timeout: 60000,
+        excludeCredentials: existing.map((item) => ({ type: "public-key", id: item.id })),
+      });
+    }
+    if (path === "/api/passkey/register" && r.method === "POST") {
+      const b = await body(r);
+      const response = await passkeyResponse("webauthn.create", origin, b.client_data, b.authenticator_data);
+      const name = typeof b.name === "string" ? b.name.trim().slice(0, 60) : "";
+      if (
+        !response ||
+        typeof b.id !== "string" ||
+        !b.id ||
+        b.id.length > 1400 ||
+        response.credentialId !== b.id ||
+        !(await passkeyKey(b.public_key, b.alg))
+      )
+        fail(400, "ลงทะเบียน Face ID ไม่สำเร็จ กรุณาลองใหม่");
+      // Each challenge works once and only for five minutes.
+      const claimed = await db
+        .prepare(
+          "DELETE FROM account_challenges WHERE challenge=? AND kind='register' AND user_id=? AND expires_at>? RETURNING challenge",
+        )
+        .bind(response.challenge, user.id, now())
+        .all();
+      const saved = claimed.results.length
+        ? await db
+            .prepare(
+              `INSERT INTO account_passkeys(id,user_id,public_key,alg,name,created_at)
+              SELECT ?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM account_passkeys WHERE user_id=?)<10
+              ON CONFLICT(id) DO NOTHING`,
+            )
+            .bind(b.id, user.id, b.public_key, Number(b.alg), name || "อุปกรณ์ของฉัน", now(), user.id)
+            .run()
+        : null;
+      if (!saved?.meta.changes) fail(400, "ลงทะเบียน Face ID ไม่สำเร็จ กรุณาลองใหม่");
+      return json({ passkeys: await passkeys() }, 201);
+    }
+    if (path === "/api/passkey/delete" && r.method === "POST") {
+      const b = await body(r);
+      await db
+        .prepare("DELETE FROM account_passkeys WHERE id=? AND user_id=?")
+        .bind(typeof b.id === "string" ? b.id : "", user.id)
+        .run();
+      return json({ passkeys: await passkeys() });
+    }
+    const current = await sessionHash(r);
+    if (path === "/api/sessions" && r.method === "GET")
+      return json({
+        sessions: (
+          await db
+            .prepare(
+              `SELECT s.rowid AS id,i.created_at,COALESCE(i.ip,'') AS ip,COALESCE(i.user_agent,'') AS user_agent,
+              COALESCE(i.method,'') AS method,s.token_hash=? AS is_current
+              FROM account_sessions s LEFT JOIN account_session_info i ON i.token_hash=s.token_hash
+              WHERE s.user_id=? AND s.expires_at>? ORDER BY is_current DESC,i.created_at DESC`,
+            )
+            .bind(current, user.id, now())
+            .all()
+        ).results.map(({ is_current, ...row }) => ({ ...row, current: Boolean(is_current) })),
+      });
+    if (path === "/api/sessions/revoke" && r.method === "POST") {
+      const b = await body(r);
+      // The device in use signs out with the normal logout button, never from this list.
+      await db
+        .prepare("DELETE FROM account_sessions WHERE user_id=? AND token_hash<>? AND (?=1 OR rowid=?)")
+        .bind(user.id, current, b.others === true ? 1 : 0, Number.isInteger(b.id) ? b.id : -1)
+        .run();
+      return json({ ok: true });
+    }
+    fail(404, "ไม่พบรายการที่ร้องขอ");
   }
   if (path === "/api/password/forgot" && r.method === "POST") {
     await limit(db, r, "password-forgot", 30, 3600);
@@ -309,6 +537,7 @@ async function api(r, env, ctx) {
     if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       fail(400, "กรุณากรอกอีเมลให้ถูกต้อง");
     if (!env.RESEND_API_KEY) fail(503, "ระบบส่งอีเมลยังไม่พร้อมใช้งาน");
+    await requireHuman(r, env, b.turnstile);
     await limit(db, r, "password-forgot-email:" + email, 3, 3600, false);
     await db
       .prepare("DELETE FROM account_password_resets WHERE expires_at<?")
@@ -383,15 +612,11 @@ async function api(r, env, ctx) {
     return json({ ok: true }, 200, { "Set-Cookie": sessionCookie(r, "", 0) });
   }
   if (path === "/api/logout" && r.method === "POST") {
-    const token = (r.headers.get("cookie") || "")
-      .split(";")
-      .map((x) => x.trim())
-      .find((x) => x.startsWith(cookieName(r) + "="))
-      ?.slice(cookieName(r).length + 1);
-    if (token)
+    const hash = await sessionHash(r);
+    if (hash)
       await db
         .prepare("DELETE FROM account_sessions WHERE token_hash=?")
-        .bind(await digest(token))
+        .bind(hash)
         .run();
     return json({ ok: true }, 200, { "Set-Cookie": sessionCookie(r, "", 0) });
   }
@@ -619,7 +844,7 @@ export default {
     headers.set("X-Frame-Options", "DENY");
     headers.set(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+      "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-src https://challenges.cloudflare.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
     );
     return new Response(response.body, { status: response.status, headers });
   },
