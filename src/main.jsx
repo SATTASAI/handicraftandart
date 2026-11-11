@@ -1,4 +1,5 @@
 import { AccountEditor, AdminOverview, PortalEditor, TrashPanel, confirmTrash } from "./components/AdminConsole";
+import { LoginLog, SecurityPanel, useTurnstile } from "./components/Security";
 import CompetitionRegistration from "./components/CompetitionRegistration";
 import Icon from "./components/Icon";
 import React, { useEffect, useRef, useState } from "react";
@@ -73,6 +74,7 @@ function Auth({ signup, onUser }) {
     [error, setError] = useState(""),
     [first, setFirst] = useState(null);
   const errorRef = useRef(null);
+  const human = useTurnstile();
   useEffect(() => {
     let active = true;
     api("/setup")
@@ -93,6 +95,7 @@ function Auth({ signup, onUser }) {
     const form = new FormData(e.currentTarget),
       data = Object.fromEntries(form);
     if (signup) data.roles = form.getAll("roles");
+    data.turnstile = human.token();
     if (signup && !data.roles.length) {
       setError("กรุณาเลือกอย่างน้อยหนึ่งบทบาท");
       return;
@@ -104,6 +107,7 @@ function Auth({ signup, onUser }) {
       onUser(result.user);
       go("/");
     } catch (e) {
+      human.reset();
       setError(e.message);
     } finally {
       setBusy(false);
@@ -241,6 +245,7 @@ function Auth({ signup, onUser }) {
                 </label>
               </fieldset>
             )}
+            {human.element}
             <button className="primary submit" type="submit">
               {busy ? "กำลังดำเนินการ…" : signup ? "สร้างบัญชี" : "เข้าสู่ระบบ"}
             </button>
@@ -275,18 +280,20 @@ function ForgotPassword() {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [sent, setSent] = useState(false);
+  const human = useTurnstile();
   async function submit(e) {
     e.preventDefault();
     if (busy) return;
     setError("");
     setBusy(true);
     try {
-      await api(
-        "/password/forgot",
-        Object.fromEntries(new FormData(e.currentTarget)),
-      );
+      await api("/password/forgot", {
+        ...Object.fromEntries(new FormData(e.currentTarget)),
+        turnstile: human.token(),
+      });
       setSent(true);
     } catch (e) {
+      human.reset();
       setError(e.message);
     } finally {
       setBusy(false);
@@ -328,6 +335,7 @@ function ForgotPassword() {
                   placeholder="name@example.com"
                 />
               </label>
+              {human.element}
               <button className="primary submit" type="submit">
                 {busy ? "กำลังส่ง…" : "ส่งลิงก์ตั้งรหัสผ่านใหม่"}
               </button>
@@ -526,6 +534,15 @@ const sectionList = [
     short: "หน้าเว็บ",
     icon: "grid",
     hint: "แก้ประกาศและข่าวบนหน้าแรก",
+    can: (r) => r.admin,
+    admin: true,
+  },
+  {
+    key: "logins",
+    label: "ประวัติการเข้าสู่ระบบ",
+    short: "ประวัติเข้าใช้",
+    icon: "shield",
+    hint: "ล็อกอินสำเร็จและล้มเหลว",
     can: (r) => r.admin,
     admin: true,
   },
@@ -1001,6 +1018,7 @@ function Account({ user, onLogout, busy }) {
           ? "คุณเป็น superadmin มีสิทธิ์ทุกอย่างในระบบ"
           : "ผู้ฝึกซ้อมลงทะเบียนนักเรียนได้ ผู้จัดตรวจเอกสารและยืนยันรายการสมัคร"}
       </p>
+      <SecurityPanel />
       <InstallCard />
       <button className="danger-button" onClick={onLogout} disabled={busy}>
         <Icon name="logout" size={20} />
@@ -1131,6 +1149,8 @@ function Shell({ user, onLogout, busy }) {
             <AdminOverview onTab={navigate} />
           ) : current.key === "portal" ? (
             <PortalEditor />
+          ) : current.key === "logins" ? (
+            <LoginLog />
           ) : current.key === "trash" ? (
             <TrashPanel />
           ) : current.key === "users" ? (

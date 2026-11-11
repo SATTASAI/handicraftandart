@@ -2,7 +2,7 @@
 
 const page = document.body.dataset.page;
 const hash = location.hash.slice(1);
-const tabs = new Set(["admin", "scoring", "competitions", "mine", "review", "judging", "results", "certificates", "manage", "judges", "users", "portal", "trash", "account"]);
+const tabs = new Set(["admin", "scoring", "competitions", "mine", "review", "judging", "results", "certificates", "manage", "judges", "users", "portal", "trash", "logins", "account"]);
 const workspace = (tab) => tabs.has(tab) ? `/workspace#${tab}` : "/";
 const format = (value) => Number(value).toLocaleString("th-TH");
 
@@ -102,7 +102,62 @@ if (page === "home" && tabs.has(hash)) location.replace(workspace(hash));
 
 if (page === "login") {
   if (hash === "judging") document.querySelector('[data-type="report"]')?.click();
-  if (["admin", "scoring", "manage", "users", "judges", "portal", "trash"].includes(hash)) document.querySelector('[data-type="admin"]')?.click();
+  if (["admin", "scoring", "manage", "users", "judges", "portal", "trash", "logins"].includes(hash)) document.querySelector('[data-type="admin"]')?.click();
+  const afterLogin = (target) => location.assign(workspace(tabs.has(hash) ? hash : target === "competitions" ? "" : target));
+  const encode = (buffer) => btoa(String.fromCharCode(...new Uint8Array(buffer))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const decode = (value) => Uint8Array.from(atob(value.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+  const extras = document.createElement("div");
+  document.querySelector(".login-form")?.parentElement.append(extras);
+
+  // Bot check, shown only when the server has Turnstile keys configured.
+  let humanToken = "";
+  let humanWidget = null;
+  const resetHuman = () => {
+    humanToken = "";
+    if (humanWidget !== null) window.turnstile?.reset(humanWidget);
+  };
+  request("/setup").then(({ turnstile_site_key: sitekey }) => {
+    if (!sitekey) return;
+    const box = element("div", "", "d-flex justify-content-center mt-3");
+    extras.prepend(box);
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    script.onload = () => {
+      humanWidget = window.turnstile.render(box, { sitekey, callback: (value) => { humanToken = value; }, "expired-callback": () => { humanToken = ""; } });
+    };
+    document.head.append(script);
+  }).catch(() => {});
+
+  // Face ID / fingerprint sign-in for accounts that enabled it on this device.
+  if (typeof window.PublicKeyCredential === "function") {
+    const button = element("button", " เข้าสู่ระบบด้วย Face ID / ลายนิ้วมือ", "btn btn-outline-primary w-100 mt-3");
+    button.type = "button";
+    button.prepend(element("i", "", "bi bi-person-bounding-box"));
+    const alert = element("p", "", "text-danger small mt-2 mb-0");
+    alert.setAttribute("role", "alert");
+    alert.hidden = true;
+    extras.append(button, alert);
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      alert.hidden = true;
+      try {
+        const options = await request("/passkey/login/options", {});
+        const credential = await navigator.credentials.get({ publicKey: { challenge: decode(options.challenge), rpId: options.rpId, userVerification: "required", timeout: options.timeout } });
+        await request("/passkey/login", {
+          id: credential.id,
+          client_data: encode(credential.response.clientDataJSON),
+          authenticator_data: encode(credential.response.authenticatorData),
+          signature: encode(credential.response.signature),
+        });
+        afterLogin(document.querySelector(".login-form.active form")?.dataset.login || "competitions");
+      } catch (error) {
+        alert.textContent = error.name === "NotAllowedError" ? "ยกเลิกหรือหมดเวลา หากยังไม่เคยเปิดใช้ Face ID ให้เข้าด้วยรหัสผ่านแล้วเปิดใช้ที่หน้า “บัญชีของฉัน”" : error.message;
+        alert.hidden = false;
+      }
+      button.disabled = false;
+    });
+  }
+
   document.querySelectorAll("[data-login]").forEach((form) => form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const submit = form.querySelector('button[type="submit"]');
@@ -111,9 +166,10 @@ if (page === "login") {
     submit.disabled = true;
     alert.hidden = true;
     try {
-      await request("/login", Object.fromEntries(new FormData(form)));
-      location.assign(workspace(tabs.has(hash) ? hash : form.dataset.login === "competitions" ? "" : form.dataset.login));
+      await request("/login", { ...Object.fromEntries(new FormData(form)), turnstile: humanToken });
+      afterLogin(form.dataset.login);
     } catch (error) {
+      resetHuman();
       alert.textContent = error.message;
       alert.hidden = false;
       submit.disabled = false;

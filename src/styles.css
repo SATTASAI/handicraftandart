@@ -1568,3 +1568,6 @@ details.panel summary {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.turnstile-box:not(:empty) {
+  margin-block: .75rem;
+}
