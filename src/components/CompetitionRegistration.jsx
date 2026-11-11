@@ -1,4 +1,4 @@
-import { CompetitionEditor, ScoringAdmin, confirmDelete } from "./AdminConsole";
+import { CompetitionEditor, ScoringAdmin, confirmTrash } from "./AdminConsole";
 import CompetitionRules, { studentCount } from "./CompetitionRules";
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../api";
@@ -646,7 +646,7 @@ function RegistrationCard({ row, review, user, onEdit, onReviewed, onDeleted }) 
   const selfReview = !user.is_superadmin && row.owner_id === user.id;
   const admin = review && user.is_superadmin;
   async function remove() {
-    const confirm = confirmDelete(`ลบทีม ${row.coach_name} ในรายการ “${row.title}” พร้อมเอกสาร คะแนน และไฟล์เกียรติบัตรของทีม`);
+    const confirm = confirmTrash(`ลบทีม ${row.coach_name} ในรายการ “${row.title}” พร้อมคะแนนของทีม`);
     if (confirm === undefined) return;
     setBusy(true);
     setError("");

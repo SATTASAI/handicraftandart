@@ -14,6 +14,165 @@ export const holdResultsFor = (select) => `INSERT OR IGNORE INTO app_settings(ke
   WHERE EXISTS(SELECT 1 FROM event_registrations r JOIN event_scores s ON s.registration_id=r.id
     WHERE r.competition_id=affected.competition_id)`;
 
+export const TRASH = "ถังขยะ";
+export const PORTAL_KEY = "portal_content";
+// Documents of trashed teams stay stored until the trash entry is purged.
+export const docNotInTrash =
+  "NOT EXISTS(SELECT 1 FROM admin_trash t, json_each(t.payload,'$.documents') j WHERE j.value=registration_documents.id)";
+// Round resets remove every team and ID image, so trashed teams and scores can no longer be restored.
+export const trashAfterReset = (judges) => [
+  "DELETE FROM admin_trash WHERE kind IN ('registration','score')",
+  `UPDATE admin_trash SET payload=json_set(payload,'$.registrations',json('[]'),'$.students',json('[]'),'$.reviews',json('[]'),'$.scores',json('[]'),'$.documents',json('[]')${judges ? ",'$.judges',json('[]')" : ""}) WHERE kind='user'`,
+];
+export const dropTrashOf =
+  "DELETE FROM admin_trash WHERE (kind='registration' AND json_extract(payload,'$.registrations[0].owner_id')=?1) OR (kind='score' AND json_extract(payload,'$.scores[0].judge_id')=?1)";
+
+const all = async (db, sql, ...args) => (await db.prepare(sql).bind(...args).all()).results;
+
+export const trashEntry = (db, user, kind, label, payload, guard = "SELECT 1", ...args) =>
+  db
+    .prepare(
+      `INSERT INTO admin_trash(id,kind,label,payload,deleted_by,deleted_at) SELECT ?,?,?,?,?,? WHERE EXISTS(${guard})`,
+    )
+    .bind(crypto.randomUUID(), kind, String(label).slice(0, 300), JSON.stringify(payload), user.id, now(), ...args);
+
+export async function teamSnapshot(db, column, id) {
+  const reg = `SELECT id FROM event_registrations WHERE ${column}=?`;
+  const students = await all(db, `SELECT * FROM event_students WHERE registration_id IN (${reg})`, id);
+  return {
+    registrations: await all(db, `SELECT * FROM event_registrations WHERE ${column}=?`, id),
+    students,
+    reviews: await all(db, `SELECT * FROM event_registration_reviews WHERE registration_id IN (${reg})`, id),
+    scores: await all(db, `SELECT * FROM event_scores WHERE registration_id IN (${reg})`, id),
+    documents: students.map((row) => row.document_id),
+  };
+}
+
+export async function userSnapshot(db, id) {
+  const team = await teamSnapshot(db, "owner_id", id);
+  return {
+    ...team,
+    user: await db.prepare("SELECT * FROM account_users WHERE id=?").bind(id).first(),
+    scores: [...team.scores, ...(await all(db, "SELECT * FROM event_scores WHERE judge_id=?", id))],
+    judges: await all(db, "SELECT * FROM event_judges WHERE judge_id=?", id),
+    documents: (await all(db, "SELECT id FROM registration_documents WHERE owner_id=?", id)).map((row) => row.id),
+  };
+}
+
+// One statement per table keeps restores inside the D1 per-request query limit.
+const insertRows = (db, table, rows, or = "") => {
+  if (!rows.length) return [];
+  const keys = Object.keys(rows[0]).filter((key) => /^[a-z0-9_]+$/i.test(key));
+  return [
+    db
+      .prepare(
+        `INSERT ${or} INTO ${table}(${keys.join(",")}) SELECT ${keys
+          .map((key) => `json_extract(j.value,'$.${key}')`)
+          .join(",")} FROM json_each(?) j`,
+      )
+      .bind(JSON.stringify(rows)),
+  ];
+};
+
+async function restoreStatements(db, admin, kind, p, fail) {
+  if (kind === "competition") {
+    const creator = await db
+      .prepare("SELECT id FROM account_users WHERE id=?")
+      .bind(p.competition.created_by)
+      .first();
+    return [
+      ...insertRows(db, "competition_catalog", p.catalog ? [p.catalog] : [], "OR IGNORE"),
+      ...insertRows(db, "event_competitions", [{ ...p.competition, created_by: creator ? creator.id : admin.id }]),
+    ];
+  }
+  const users = new Set((await all(db, "SELECT id FROM account_users")).map((row) => row.id));
+  if (p.user) users.add(p.user.id);
+  const known = (id) => (id && !users.has(id) ? admin.id : id);
+  const competitions = new Set((await all(db, "SELECT id FROM event_competitions")).map((row) => row.id));
+  const registrations = (p.registrations || []).filter(
+    (row) => competitions.has(row.competition_id) && users.has(row.owner_id),
+  );
+  if (kind === "registration" && !registrations.length)
+    fail(409, "กู้คืนบัญชีผู้ฝึกซ้อมและรายการแข่งขันของทีมนี้ก่อน");
+  const revisions = new Map(
+    (
+      await all(
+        db,
+        "SELECT id,revision FROM event_registrations WHERE id IN (SELECT json_extract(value,'$.registration_id') FROM json_each(?))",
+        JSON.stringify(p.scores || []),
+      )
+    ).map((row) => [row.id, row.revision]),
+  );
+  for (const row of registrations) revisions.set(row.id, row.revision);
+  const kept = (row) => registrations.some((registration) => registration.id === row.registration_id);
+  const scores = (p.scores || []).filter(
+    (row) => users.has(row.judge_id) && revisions.get(row.registration_id) === row.revision,
+  );
+  if (kind === "score" && !scores.length) fail(409, "ทีมหรือกรรมการของคะแนนนี้เปลี่ยนไปแล้ว จึงกู้คืนไม่ได้");
+  const owner = p.user?.id || registrations[0]?.owner_id;
+  return [
+    ...insertRows(db, "account_users", p.user ? [p.user] : []),
+    ...(owner
+      ? [
+          db
+            .prepare(
+              "UPDATE registration_documents SET owner_id=? WHERE id IN (SELECT value FROM json_each(?))",
+            )
+            .bind(owner, JSON.stringify(p.documents || [])),
+        ]
+      : []),
+    ...insertRows(
+      db,
+      "event_registrations",
+      registrations.map((row) => ({ ...row, reviewed_by: known(row.reviewed_by) })),
+    ),
+    ...insertRows(db, "event_students", (p.students || []).filter(kept)),
+    ...insertRows(
+      db,
+      "event_registration_reviews",
+      (p.reviews || []).filter(kept).map((row) => ({ ...row, reviewer_id: known(row.reviewer_id) })),
+    ),
+    ...insertRows(
+      db,
+      "event_judges",
+      (p.judges || [])
+        .filter((row) => competitions.has(row.competition_id))
+        .map((row) => ({ ...row, assigned_by: known(row.assigned_by) })),
+    ),
+    ...insertRows(db, "event_scores", scores),
+  ];
+}
+
+const line = (value, max) => (typeof value === "string" ? value.trim().slice(0, max) : "");
+function portalContent(b, fail) {
+  const news = Array.isArray(b.news) ? b.news : [];
+  const countdown = line(b.countdown_at, 40);
+  const link = (value) => /^(https:\/\/|\/)[^\s]*$/.test(value) && !value.startsWith("//");
+  const content = {
+    title: line(b.title, 150),
+    subtitle: line(b.subtitle, 200),
+    hero: line(b.hero, 500),
+    marquee: line(b.marquee, 500),
+    countdown_label: line(b.countdown_label, 100),
+    countdown_at: countdown,
+    news: news.map((item) => ({
+      title: line(item?.title, 300),
+      date: line(item?.date, 10),
+      url: line(item?.url, 500),
+    })),
+  };
+  if (
+    news.length > 50 ||
+    (countdown && !Number.isFinite(Date.parse(countdown))) ||
+    content.news.some(
+      (item) =>
+        !item.title || (item.date && !/^\d{4}-\d{2}-\d{2}$/.test(item.date)) || (item.url && !link(item.url)),
+    )
+  )
+    fail(400, "ตรวจสอบวันเวลา หัวข้อข่าว และลิงก์ (ต้องขึ้นต้นด้วย https:// หรือ /)");
+  return content;
+}
+
 export async function cleanAdminFiles(env) {
   const db = env.DB;
   const pending = "key GLOB 'admin_delete_file:*'";
@@ -49,6 +208,7 @@ export async function adminApi(request, env, user, { body, json, fail }) {
   const registrationId = match(`registrations/(${uuidPattern})/delete`);
   const accountId = match(`users/(${uuidPattern})`);
   const certificatesId = match(`certificates/(${idPattern})/clear`);
+  const trashId = match(`trash/(${uuidPattern})`);
   const getCompetition = async (id) => {
     const row = await db.prepare("SELECT * FROM event_competitions WHERE id=?").bind(id).first();
     if (!row) fail(404, "ไม่พบรายการแข่งขัน");
@@ -57,6 +217,63 @@ export async function adminApi(request, env, user, { body, json, fail }) {
   const confirm = (data, value = "ลบถาวร") => {
     if (data.confirm !== value) fail(400, "กรุณาพิมพ์คำยืนยันให้ถูกต้อง");
   };
+  // "ถังขยะ" keeps a restorable copy; "ลบถาวร" removes the data immediately.
+  const trashing = (data) => {
+    if (data.confirm !== TRASH) confirm(data);
+    return data.confirm === TRASH;
+  };
+  if (route === "trash" && method === "GET") {
+    return json({
+      items: await all(
+        db,
+        `SELECT t.id,t.kind,t.label,t.deleted_at,u.name AS deleted_by_name FROM admin_trash t
+        LEFT JOIN account_users u ON u.id=t.deleted_by ORDER BY t.deleted_at DESC,t.id LIMIT 500`,
+      ),
+    });
+  }
+  if (trashId && method === "POST") {
+    const b = await body(request);
+    const entry = await db.prepare("SELECT * FROM admin_trash WHERE id=?").bind(trashId).first();
+    if (!entry) fail(404, "ไม่พบรายการในถังขยะ");
+    const p = JSON.parse(entry.payload);
+    const drop = db.prepare("DELETE FROM admin_trash WHERE id=?").bind(entry.id);
+    if (b.action === "purge") {
+      confirm(b);
+      const documents = JSON.stringify(p.documents || []);
+      const unused = `id IN (SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM event_students WHERE document_id=registration_documents.id)`;
+      await db.batch([
+        db.prepare(queueFile(`SELECT drive_file_id AS id FROM registration_documents WHERE ${unused}`)).bind(documents),
+        db.prepare(`DELETE FROM registration_documents WHERE ${unused}`).bind(documents),
+        db.prepare(dropTrashOf).bind(p.user?.id || ""),
+        drop,
+      ]);
+      return json({ remaining: await cleanAdminFiles(env) });
+    }
+    if (b.action !== "restore") fail(400, "คำสั่งไม่ถูกต้อง");
+    const statements = await restoreStatements(db, user, entry.kind, p, fail);
+    try {
+      await db.batch([...statements, drop]);
+    } catch (error) {
+      console.error("trash restore failed", entry.id, error);
+      fail(409, "กู้คืนไม่ได้ เพราะมีข้อมูลซ้ำหรือข้อมูลที่เกี่ยวข้องถูกลบไปแล้ว");
+    }
+    return json({ ok: true });
+  }
+  if (route === "portal" && method === "GET") {
+    const row = await db.prepare("SELECT value FROM app_settings WHERE key=?").bind(PORTAL_KEY).first();
+    return json({ content: row ? JSON.parse(row.value) : {} });
+  }
+  if (route === "portal" && method === "POST") {
+    const content = portalContent(await body(request, 65536), fail);
+    await db
+      .prepare(
+        `INSERT INTO app_settings(key,value,updated_by,updated_at) VALUES(?,?,?,?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_by=excluded.updated_by,updated_at=excluded.updated_at`,
+      )
+      .bind(PORTAL_KEY, JSON.stringify(content), user.id, now())
+      .run();
+    return json({ content });
+  }
   if (route === "overview" && method === "GET") {
     return json(
       await db
@@ -69,6 +286,7 @@ export async function adminApi(request, env, user, { body, json, fail }) {
       (SELECT COUNT(*) FROM event_registrations WHERE status='pending') AS pending,
       (SELECT COUNT(*) FROM event_scores) AS scores,
       (SELECT COUNT(*) FROM app_settings WHERE key GLOB 'admin_delete_file:*') AS files_pending,
+      (SELECT COUNT(*) FROM admin_trash) AS trash,
       COALESCE((SELECT value='false' FROM app_settings WHERE key='system_enabled'),0) AS system_closed`,
         )
         .first(),
@@ -156,16 +374,36 @@ export async function adminApi(request, env, user, { body, json, fail }) {
     const b = await body(request, 32768);
     const c = await getCompetition(competitionId);
     if (b.action === "delete") {
-      confirm(b);
-      const deleted = await db.batch([
-        db
-          .prepare(
-            `DELETE FROM event_competitions WHERE id=?1
-          AND NOT EXISTS(SELECT 1 FROM event_registrations WHERE competition_id=?1)
+      const unused = `NOT EXISTS(SELECT 1 FROM event_registrations WHERE competition_id=?1)
           AND NOT EXISTS(SELECT 1 FROM event_judges WHERE competition_id=?1)
-          AND NOT EXISTS(SELECT 1 FROM certificate_files WHERE competition_id=?1)`,
-          )
-          .bind(c.id),
+          AND NOT EXISTS(SELECT 1 FROM certificate_files WHERE competition_id=?1)`;
+      const kept = trashing(b)
+        ? [
+            db
+              .prepare(
+                `INSERT INTO admin_trash(id,kind,label,payload,deleted_by,deleted_at)
+              SELECT ?2,'competition',?3,?4,?5,?6 FROM event_competitions WHERE id=?1 AND ${unused}`,
+              )
+              .bind(
+                c.id,
+                crypto.randomUUID(),
+                [c.title, c.grade_label].filter(Boolean).join(" ").slice(0, 300),
+                JSON.stringify({
+                  competition: c,
+                  catalog: await db
+                    .prepare("SELECT * FROM competition_catalog WHERE catalog_key=?")
+                    .bind(c.catalog_key)
+                    .first(),
+                }),
+                user.id,
+                now(),
+              ),
+          ]
+        : [];
+      const deleted = (
+        await db.batch([
+          ...kept,
+        db.prepare(`DELETE FROM event_competitions WHERE id=?1 AND ${unused}`).bind(c.id),
         db
           .prepare(
             `DELETE FROM competition_catalog WHERE catalog_key=? AND NOT EXISTS
@@ -177,7 +415,8 @@ export async function adminApi(request, env, user, { body, json, fail }) {
             "DELETE FROM app_settings WHERE key=? AND NOT EXISTS(SELECT 1 FROM event_competitions WHERE id=?)",
           )
           .bind("results_hold:" + c.id, c.id),
-      ]);
+        ])
+      ).slice(kept.length);
       if (!deleted[0].meta.changes) fail(409, "ลบใบสมัครและไฟล์เกียรติบัตร รวมถึงถอนกรรมการของรายการนี้ก่อน");
       return json({ ok: true });
     }
@@ -284,11 +523,23 @@ export async function adminApi(request, env, user, { body, json, fail }) {
   }
   if (registrationId && method === "POST") {
     const b = await body(request);
-    confirm(b);
+    const trash = trashing(b);
     if (!Number.isInteger(b.revision)) fail(400, "ข้อมูลฉบับที่ไม่ถูกต้อง");
     const reg = "SELECT id FROM event_registrations WHERE id=?1 AND revision=?2";
     const doc = `SELECT document_id FROM event_students WHERE registration_id IN (${reg})`;
-    const removed = await db.batch([
+    const certificates = `SELECT drive_file_id AS id FROM certificate_files WHERE unit_key IN (SELECT 'student.'||id FROM (${reg}) UNION SELECT 'coach.'||id FROM (${reg}))`;
+    const bound = (sql) => db.prepare(sql).bind(registrationId, b.revision);
+    const info = trash
+      ? await db
+          .prepare(
+            `SELECT c.title,u.name,u.school FROM event_registrations r JOIN event_competitions c ON c.id=r.competition_id
+          JOIN account_users u ON u.id=r.owner_id WHERE r.id=? AND r.revision=?`,
+          )
+          .bind(registrationId, b.revision)
+          .first()
+      : null;
+    if (trash && !info) fail(409, "รายการถูกลบหรือแก้ไขแล้ว กรุณาโหลดข้อมูลใหม่");
+    const before = [
       db
         .prepare(
           holdResultsFor(
@@ -296,32 +547,50 @@ export async function adminApi(request, env, user, { body, json, fail }) {
           ),
         )
         .bind(registrationId, b.revision),
-      db
-        .prepare(
-          queueFile(`SELECT drive_file_id AS id FROM registration_documents WHERE id IN (${doc})
-        UNION SELECT drive_file_id FROM certificate_files WHERE unit_key IN (SELECT 'student.'||id FROM (${reg}) UNION SELECT 'coach.'||id FROM (${reg}))`),
-        )
-        .bind(registrationId, b.revision),
-      ...[
-        `DELETE FROM certificate_files WHERE unit_key IN (SELECT 'student.'||id FROM (${reg}) UNION SELECT 'coach.'||id FROM (${reg}))`,
-        `DELETE FROM event_scores WHERE registration_id IN (${reg})`,
-        `DELETE FROM event_registration_reviews WHERE registration_id IN (${reg})`,
-        `DELETE FROM event_registrations WHERE id IN (${reg}) RETURNING id`,
-      ].map((sql) => db.prepare(sql).bind(registrationId, b.revision)),
-      db
-        .prepare(
-          `DELETE FROM registration_documents WHERE NOT EXISTS(SELECT 1 FROM event_students WHERE document_id=registration_documents.id)
-        AND id IN (SELECT value FROM json_each(?))`,
-        )
-        .bind(
-          JSON.stringify(
-            (await db.prepare(doc).bind(registrationId, b.revision).all()).results.map(
-              (row) => row.document_id,
-            ),
-          ),
+      bound(
+        queueFile(
+          trash
+            ? certificates
+            : `SELECT drive_file_id AS id FROM registration_documents WHERE id IN (${doc}) UNION ${certificates}`,
         ),
-    ]);
-    if (!removed[5].results.length) fail(409, "รายการถูกลบหรือแก้ไขแล้ว กรุณาโหลดข้อมูลใหม่");
+      ),
+      ...(trash
+        ? [
+            trashEntry(
+              db,
+              user,
+              "registration",
+              `ทีม ${info.school} · ${info.name} — ${info.title}`,
+              await teamSnapshot(db, "id", registrationId),
+              "SELECT 1 FROM event_registrations WHERE id=? AND revision=?",
+              registrationId,
+              b.revision,
+            ),
+          ]
+        : []),
+    ];
+    const removed = (
+      await db.batch([
+        ...before,
+        ...[
+          `DELETE FROM certificate_files WHERE unit_key IN (SELECT 'student.'||id FROM (${reg}) UNION SELECT 'coach.'||id FROM (${reg}))`,
+          `DELETE FROM event_scores WHERE registration_id IN (${reg})`,
+          `DELETE FROM event_registration_reviews WHERE registration_id IN (${reg})`,
+          `DELETE FROM event_registrations WHERE id IN (${reg}) RETURNING id`,
+        ].map(bound),
+        ...(trash
+          ? []
+          : [
+              db
+                .prepare(
+                  `DELETE FROM registration_documents WHERE NOT EXISTS(SELECT 1 FROM event_students WHERE document_id=registration_documents.id)
+        AND id IN (SELECT value FROM json_each(?))`,
+                )
+                .bind(JSON.stringify((await bound(doc).all()).results.map((row) => row.document_id))),
+            ]),
+      ])
+    ).slice(before.length);
+    if (!removed[3].results.length) fail(409, "รายการถูกลบหรือแก้ไขแล้ว กรุณาโหลดข้อมูลใหม่");
     return json({ remaining: await cleanAdminFiles(env) });
   }
   if (scoringId && method === "GET") {
@@ -383,15 +652,43 @@ export async function adminApi(request, env, user, { body, json, fail }) {
     )
       fail(400, "ข้อมูลทีมและกรรมการไม่ถูกต้อง");
     if (b.action === "delete") {
-      confirm(b);
-      const result = await db
-        .prepare(
-          `DELETE FROM event_scores WHERE registration_id=? AND judge_id=?
+      const trash = trashing(b);
+      const current = `SELECT 1 FROM event_scores s JOIN event_registrations r ON r.id=s.registration_id
+        WHERE s.registration_id=? AND s.judge_id=? AND r.competition_id=? AND r.revision=?`;
+      const key = [b.registration_id, b.judge_id, c.id, b.revision];
+      const score = trash
+        ? await db
+            .prepare(
+              `SELECT s.*,j.name AS judge_name,u.school AS team_school FROM event_scores s
+            JOIN event_registrations r ON r.id=s.registration_id JOIN account_users u ON u.id=r.owner_id
+            LEFT JOIN account_users j ON j.id=s.judge_id WHERE s.registration_id=? AND s.judge_id=?`,
+            )
+            .bind(b.registration_id, b.judge_id)
+            .first()
+        : null;
+      const { judge_name, team_school, ...row } = score || {};
+      const results = await db.batch([
+        ...(score
+          ? [
+              trashEntry(
+                db,
+                user,
+                "score",
+                `คะแนนของ ${judge_name || "กรรมการ"} ให้ทีม ${team_school} — ${c.title}`,
+                { scores: [row] },
+                current,
+                ...key,
+              ),
+            ]
+          : []),
+        db
+          .prepare(
+            `DELETE FROM event_scores WHERE registration_id=? AND judge_id=?
         AND EXISTS(SELECT 1 FROM event_registrations WHERE id=registration_id AND competition_id=? AND revision=?)`,
-        )
-        .bind(b.registration_id, b.judge_id, c.id, b.revision)
-        .run();
-      if (!result.meta.changes) fail(409, "คะแนนถูกลบหรือข้อมูลทีมเปลี่ยนแล้ว");
+          )
+          .bind(...key),
+      ]);
+      if (!results.at(-1).meta.changes) fail(409, "คะแนนถูกลบหรือข้อมูลทีมเปลี่ยนแล้ว");
       return json({ ok: true });
     }
     const criteria = criteriaOf(c.rules_json);

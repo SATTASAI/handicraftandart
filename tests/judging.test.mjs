@@ -384,3 +384,89 @@ test("superadmin console manages accounts, rules, team evidence, scoring and pub
   assert.equal((await read(root + "overview")).body.registrations, 0);
   assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM account_bootstrap").first()).n, 1);
 });
+
+test("trash restores deleted scores, teams, accounts and competitions; portal content is editable", async (t) => {
+  const { db, request, signup, raw, upload } = await runtime(t);
+  const admin = await signup("trash-admin");
+  const coach = await signup("trash-coach");
+  const judge = await signup("trash-judge", ["judge"]);
+  const read = (path, who = admin) => request(path, undefined, who.cookie);
+  const write = (path, data, who = admin) => request(path, data, who.cookie);
+  const root = "/admin/console/";
+  const count = async (table) => (await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first()).n;
+  const { id } = (await write("/admin/competitions", { title: "รายการถังขยะ", min_students: 1, max_students: 1 })).body;
+  const image = await upload(coach.cookie);
+  const entry = await write("/registrations", {
+    competition_id: id, request_id: crypto.randomUUID(), students: [student(image)],
+  }, coach);
+  assert.equal(entry.status, 201, JSON.stringify(entry.body));
+  const team = entry.body.registration;
+  assert.equal((await write(`/admin/registrations/${team.id}/review`, { revision: 1, status: "approved" })).status, 200);
+  const judgeId = judge.body.user.id;
+  assert.equal((await write("/admin/judges", { competition_id: id, judge_id: judgeId, assigned: true })).status, 200);
+  const scoring = root + "scoring/" + id;
+  const score = { registration_id: team.id, judge_id: judgeId, revision: 1, scores: [75] };
+  assert.equal((await write(scoring, score)).status, 200);
+  const trash = async () => (await read(root + "trash")).body.items;
+  const restore = async (kind) => {
+    const result = await write(root + "trash/" + (await trash()).find((item) => item.kind === kind).id, { action: "restore" });
+    assert.equal(result.status, 200, kind + " " + JSON.stringify(result.body));
+  };
+  assert.equal((await read(root + "trash", coach)).status, 403);
+
+  assert.equal((await write(scoring, { ...score, action: "delete", confirm: "ถังขยะ" })).status, 200);
+  assert.equal(await count("event_scores"), 0);
+  assert.equal((await read(root + "overview")).body.trash, 1);
+  await restore("score");
+  assert.equal((await read(scoring)).body.scores.length, 1);
+
+  const removeTeam = root + "registrations/" + team.id + "/delete";
+  assert.equal((await write(removeTeam, { revision: 1, confirm: "ถังขยะ" })).status, 200);
+  assert.equal(await count("event_registrations"), 0);
+  assert.equal(await count("event_students"), 0);
+  assert.equal(await count("registration_documents"), 1);
+  assert.equal((await raw("/registration-documents/" + image, coach.cookie, undefined, undefined, "DELETE")).status, 409);
+  await restore("registration");
+  assert.equal((await read("/registrations/" + team.id, coach)).body.registration.students.length, 1);
+  assert.equal(await count("event_scores"), 1);
+
+  const account = "/admin/users/" + coach.body.user.id + "/delete";
+  assert.equal((await write(account, { confirm: "ถังขยะ" })).status, 200);
+  assert.equal(await count("event_registrations"), 0);
+  assert.equal(await count("registration_documents"), 1);
+  assert.equal((await read("/me", coach)).body.user, null);
+  await restore("user");
+  const login = await request("/login", { email: coach.body.user.email, password: "test-only-passphrase-2026" });
+  assert.equal(login.status, 200, JSON.stringify(login.body));
+  assert.equal((await request("/registrations/" + team.id, undefined, login.cookie)).body.registration.owner_id, coach.body.user.id);
+  assert.equal((await raw("/registration-documents/" + image, login.cookie, undefined, undefined, "GET")).status, 200);
+  assert.equal((await read(scoring)).body.scores.length, 1);
+
+  assert.equal((await write(removeTeam, { revision: 1, confirm: "ถังขยะ" })).status, 200);
+  const purge = root + "trash/" + (await trash())[0].id;
+  assert.equal((await write(purge, { action: "purge" })).status, 400);
+  assert.equal((await write(purge, { action: "purge", confirm: "ลบถาวร" })).status, 200);
+  assert.equal(await count("registration_documents"), 0);
+
+  const competition = root + "competitions/" + id;
+  assert.equal((await write(competition, { action: "delete", confirm: "ถังขยะ" })).status, 409);
+  assert.equal((await write("/admin/judges", { competition_id: id, judge_id: judgeId, assigned: false })).status, 200);
+  assert.equal((await write(competition, { action: "delete", confirm: "ถังขยะ" })).status, 200);
+  assert.equal((await read("/competitions")).body.competitions.some((c) => c.id === id), false);
+  await restore("competition");
+  assert.equal((await read("/competitions")).body.competitions.some((c) => c.id === id), true);
+  assert.equal((await trash()).length, 0);
+  assert.equal((await db.prepare("PRAGMA foreign_key_check").all()).results.length, 0);
+
+  const portal = root + "portal";
+  assert.equal((await write(portal, { title: "x" }, judge)).status, 403);
+  assert.equal((await write(portal, { news: [{ title: "ข่าว", url: "javascript:alert(1)" }] })).status, 400);
+  const saved = await write(portal, {
+    title: " งานใหม่ ", countdown_at: "2026-12-01T02:00:00.000Z",
+    news: [{ title: "ข่าวแรก", date: "2026-11-11", url: "https://example.test/a" }],
+  });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  const page = (await request("/portal")).body;
+  assert.equal(page.content.title, "งานใหม่");
+  assert.equal(page.content.news[0].title, "ข่าวแรก");
+});

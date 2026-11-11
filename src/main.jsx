@@ -1,4 +1,4 @@
-import { AccountEditor, AdminOverview, confirmDelete } from "./components/AdminConsole";
+import { AccountEditor, AdminOverview, PortalEditor, TrashPanel, confirmTrash } from "./components/AdminConsole";
 import CompetitionRegistration from "./components/CompetitionRegistration";
 import Icon from "./components/Icon";
 import React, { useEffect, useRef, useState } from "react";
@@ -521,6 +521,24 @@ const sectionList = [
     admin: true,
   },
   {
+    key: "portal",
+    label: "เนื้อหาหน้าเว็บ",
+    short: "หน้าเว็บ",
+    icon: "grid",
+    hint: "แก้ประกาศและข่าวบนหน้าแรก",
+    can: (r) => r.admin,
+    admin: true,
+  },
+  {
+    key: "trash",
+    label: "ถังขยะ",
+    short: "ถังขยะ",
+    icon: "clipboard",
+    hint: "กู้คืนหรือลบถาวร",
+    can: (r) => r.admin,
+    admin: true,
+  },
+  {
     key: "account",
     label: "บัญชีของฉัน",
     short: "บัญชี",
@@ -665,15 +683,15 @@ function UsersPanel() {
     }
   }
   async function deleteUser(u) {
-    const confirm = confirmDelete(
-      "ลบบัญชี " + u.name + " พร้อมทีมที่บัญชีนี้สมัคร เอกสาร เกียรติบัตร และคะแนนที่บัญชีนี้ให้",
+    const confirm = confirmTrash(
+      "ลบบัญชี " + u.name + " พร้อมทีมที่บัญชีนี้สมัครและคะแนนที่บัญชีนี้ให้",
     );
     if (confirm === undefined) return;
     setOrganizerBusy(true);
     setError("");
     try {
       const result = await api("/admin/users/" + u.id + "/delete", { confirm });
-      setNotice(result.remaining ? `ลบบัญชีแล้ว มีไฟล์ Drive รอลบอีก ${result.remaining} ไฟล์` : "ลบบัญชีแล้ว");
+      setNotice(result.remaining ? `ย้ายบัญชีไปถังขยะแล้ว มีไฟล์ Drive รอลบอีก ${result.remaining} ไฟล์` : "ย้ายบัญชีไปถังขยะแล้ว");
       setUsers((previous) => previous.filter((x) => x.id !== u.id));
     } catch (e) {
       setError(e.message);
@@ -1111,6 +1129,10 @@ function Shell({ user, onLogout, busy }) {
             <Account user={user} onLogout={onLogout} busy={busy} />
           ) : current.key === "admin" ? (
             <AdminOverview onTab={navigate} />
+          ) : current.key === "portal" ? (
+            <PortalEditor />
+          ) : current.key === "trash" ? (
+            <TrashPanel />
           ) : current.key === "users" ? (
             <>
               <UsersPanel />
