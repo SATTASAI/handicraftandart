@@ -117,9 +117,7 @@ function Auth({ signup, onUser }) {
     <div className="auth-screen">
       <aside className="welcome">
         <div className="welcome-brand">
-          <span className="brand-mark" aria-hidden="true">
-            ศ
-          </span>
+          <img className="brand-logo" src="/portal/media/logo.webp" alt="" />
           <span>
             <strong>ศิลปหัตถกรรมนักเรียน</strong>
             <small>ศูนย์เครือข่ายสองพี่น้อง ห้วยแม่เพรียง ป่าเด็ง</small>
@@ -574,6 +572,35 @@ const workspaceTabs = new Set([
   "manage",
   "judges",
 ]);
+// Night mode uses the same saved preference as the public site.
+const THEME_KEY = "arts-network-portal-dark";
+function savedDark() {
+  try {
+    return localStorage.getItem(THEME_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+document.documentElement.classList.toggle("dark-mode", savedDark());
+function ThemeToggle() {
+  const [dark, setDark] = useState(savedDark);
+  function toggle() {
+    const next = !dark;
+    document.documentElement.classList.toggle("dark-mode", next);
+    try {
+      localStorage.setItem(THEME_KEY, String(next));
+    } catch {
+      /* The browser may block saved preferences. */
+    }
+    setDark(next);
+  }
+  const label = dark ? "โหมดกลางวัน" : "โหมดกลางคืน";
+  return (
+    <button type="button" className="theme-toggle" onClick={toggle} aria-label={label} title={label}>
+      <Icon name={dark ? "sun" : "moon"} size={20} />
+    </button>
+  );
+}
 function rolesOf(user) {
   return {
     admin: Boolean(user.is_superadmin),
@@ -1090,12 +1117,10 @@ function Shell({ user, onLogout, busy }) {
     <div className="app-shell">
       <aside className="sidebar" aria-label="เมนูหลัก">
         <div className="sidebar-brand">
-          <span className="brand-mark" aria-hidden="true">
-            ศ
-          </span>
+          <img className="brand-logo" src="/portal/media/logo.webp" alt="" />
           <span>
-            <strong>ศิลปหัตถกรรม</strong>
-            <small>ศูนย์เครือข่ายสองพี่น้อง</small>
+            <strong>การแข่งขันศิลปหัตถกรรม</strong>
+            <small>ศูนย์เครือข่ายสองพี่น้อง ห้วยแม่เพรียง ป่าเด็ง</small>
           </span>
         </div>
         <nav className="sidebar-nav">
@@ -1123,22 +1148,27 @@ function Shell({ user, onLogout, busy }) {
       </aside>
       <div className="app-main">
         <header className="app-bar">
-          <span className="brand-mark" aria-hidden="true">
-            ศ
-          </span>
+          <img className="brand-logo" src="/portal/media/logo.webp" alt="" />
           <span className="app-bar-title">
             <strong>{tab === "home" ? "ศิลปหัตถกรรม" : current.label}</strong>
             <small>ศูนย์เครือข่ายสองพี่น้อง ห้วยแม่เพรียง ป่าเด็ง</small>
           </span>
-          <button
-            className="avatar-button"
-            onClick={() => navigate("account")}
-            aria-label="บัญชีของฉัน"
-          >
-            <span className="avatar" aria-hidden="true">
-              {user.name.trim().charAt(0)}
-            </span>
-          </button>
+          <span className="bar-actions">
+            <a className="bar-link" href="/" aria-label="หน้าเว็บหลัก">
+              <Icon name="home" size={20} />
+              <span>หน้าเว็บหลัก</span>
+            </a>
+            <ThemeToggle />
+            <button
+              className="avatar-button"
+              onClick={() => navigate("account")}
+              aria-label="บัญชีของฉัน"
+            >
+              <span className="avatar" aria-hidden="true">
+                {user.name.trim().charAt(0)}
+              </span>
+            </button>
+          </span>
         </header>
         <main id="main" tabIndex={-1} className="screen">
           {current.key === "home" ? (
@@ -1295,9 +1325,7 @@ function App() {
     <main id="main" className="public-screen">
       {!ready ? (
         <div className="splash" role="status">
-          <span className="brand-mark" aria-hidden="true">
-            ศ
-          </span>
+          <img className="brand-logo" src="/portal/media/logo.webp" alt="" />
           <p>กำลังตรวจสอบบัญชี…</p>
         </div>
       ) : error ? (
