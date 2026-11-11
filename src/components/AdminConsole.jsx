@@ -7,6 +7,10 @@ export function confirmDelete(impact) {
   return window.prompt(impact + "\nพิมพ์ ลบถาวร เพื่อยืนยัน")?.trim();
 }
 
+export function confirmTrash(impact) {
+  return window.confirm(impact + "\nย้ายไปถังขยะ? กู้คืนได้ที่เมนู “ถังขยะ”") ? "ถังขยะ" : undefined;
+}
+
 function useAdminAction() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
@@ -57,6 +61,8 @@ const groups = [
     "บัญชี สิทธิ์ และการตั้งค่าระบบ",
     "แก้ข้อมูลผู้ใช้ กำหนดสิทธิ์ จัดการเอกสารใน Drive เปิด–ปิดระบบ และเริ่มรอบใหม่",
   ],
+  ["portal", "เนื้อหาหน้าเว็บ", "แก้ชื่องาน ข้อความประกาศ นับถอยหลัง และข่าวประชาสัมพันธ์บนหน้าแรก"],
+  ["trash", "ถังขยะ", "กู้คืนหรือลบถาวรรายการแข่งขัน ทีม คะแนน และบัญชีที่ลบไว้"],
 ];
 
 export function AdminOverview({ onTab }) {
@@ -85,6 +91,7 @@ export function AdminOverview({ onTab }) {
                 ["pending", "รอตรวจ"],
                 ["accounts", "บัญชีผู้ใช้"],
                 ["scores", "รายการคะแนน"],
+                ["trash", "ในถังขยะ"],
               ].map(([key, label]) => (
                 <div key={key}>
                   <dt>{label}</dt>
@@ -243,13 +250,13 @@ export function CompetitionEditor({ competition: c, onSaved, onCancel }) {
     });
   }
   function remove() {
-    const confirm = confirmDelete(
-      `ลบรายการ “${c.title}”${c.catalog_key ? " และต้นแบบเกณฑ์ของรายการนี้" : ""} ถาวร`,
+    const confirm = confirmTrash(
+      `ลบรายการ “${c.title}”${c.catalog_key ? " และต้นแบบเกณฑ์ของรายการนี้" : ""}`,
     );
     if (confirm === undefined) return;
     run(async () => {
       await api(root + "competitions/" + c.id, { action: "delete", confirm });
-      onSaved("ลบรายการแข่งขันแล้ว");
+      onSaved("ย้ายรายการแข่งขันไปถังขยะแล้ว");
     });
   }
   return (
@@ -593,11 +600,11 @@ function CompetitionScores({ id }) {
                       type="button"
                       className="danger-button"
                       onClick={() => {
-                        const confirm = confirmDelete(
+                        const confirm = confirmTrash(
                           `ลบคะแนนของกรรมการ ${judge?.name} สำหรับทีม ${team.school} · ${team.name}`,
                         );
                         if (confirm !== undefined)
-                          run(scoreAction({ action: "delete", confirm }), "ลบคะแนนแล้ว");
+                          run(scoreAction({ action: "delete", confirm }), "ย้ายคะแนนไปถังขยะแล้ว");
                       }}
                     >
                       ลบคะแนน
@@ -610,5 +617,200 @@ function CompetitionScores({ id }) {
         </>
       )}
     </>
+  );
+}
+
+const trashKinds = {
+  competition: "รายการแข่งขัน",
+  registration: "ทีม/ใบสมัคร",
+  score: "คะแนน",
+  user: "บัญชีผู้ใช้",
+};
+
+export function TrashPanel() {
+  const [items, setItems] = useState(null);
+  const { busy, message, run } = useAdminAction();
+  const load = async () => setItems((await api(root + "trash")).items);
+  useEffect(() => {
+    run(load);
+  }, []);
+  const act = (item, data, success) =>
+    run(async () => {
+      const result = await api(root + "trash/" + item.id, data);
+      await load();
+      return result;
+    }, success);
+  return (
+    <section className="panel">
+      <h1>ถังขยะ</h1>
+      <p className="muted">
+        ข้อมูลที่ลบจากหลังบ้านจะอยู่ที่นี่จนกว่าจะกู้คืนหรือลบถาวร ทีมและบัญชีที่กู้คืนจะได้ภาพบัตร
+        นักเรียน และคะแนนเดิมกลับมา การล้างข้อมูลหรือเริ่มรอบใหม่จะลบทีมและคะแนนในถังขยะด้วย
+      </p>
+      <Feedback message={message} />
+      {items && !items.length && <p className="muted">ถังขยะว่าง</p>}
+      <ul className="list-group">
+        {(items || []).map((item) => (
+          <li className="list-row" key={item.id}>
+            <span className="list-main">
+              <strong>{item.label}</strong>
+              <small>
+                {trashKinds[item.kind]} · ลบเมื่อ {new Date(item.deleted_at * 1000).toLocaleString("th-TH")}
+                {item.deleted_by_name ? " · โดย " + item.deleted_by_name : ""}
+              </small>
+            </span>
+            <button
+              type="button"
+              className="secondary row-action"
+              disabled={busy}
+              onClick={() => act(item, { action: "restore" }, "กู้คืนแล้ว")}
+            >
+              กู้คืน
+            </button>
+            <button
+              type="button"
+              className="danger-button row-action"
+              disabled={busy}
+              onClick={() => {
+                const confirm = confirmDelete(`ลบ “${item.label}” ออกจากถังขยะถาวร กู้คืนไม่ได้อีก`);
+                if (confirm !== undefined) act(item, { action: "purge", confirm }, "ลบถาวรแล้ว");
+              }}
+            >
+              ลบถาวร
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+export function PortalEditor() {
+  const [content, setContent] = useState(null);
+  const [news, setNews] = useState([]);
+  const { busy, message, run } = useAdminAction();
+  useEffect(() => {
+    run(async () => {
+      const result = await api(root + "portal");
+      setNews(result.content.news || []);
+      setContent(result.content);
+    });
+  }, []);
+  const update = (index, key, value) =>
+    setNews((rows) => rows.map((row, i) => (i === index ? { ...row, [key]: value } : row)));
+  function save(event) {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(event.currentTarget));
+    run(
+      () =>
+        api(root + "portal", {
+          title: values.title,
+          subtitle: values.subtitle,
+          hero: values.hero,
+          marquee: values.marquee,
+          countdown_label: values.countdown_label,
+          countdown_at: values.countdown_at ? new Date(values.countdown_at + ":00+07:00").toISOString() : "",
+          news,
+        }),
+      "บันทึกเนื้อหาหน้าเว็บแล้ว",
+    );
+  }
+  return (
+    <section className="panel">
+      <h1>เนื้อหาหน้าเว็บ</h1>
+      <p className="muted">ช่องที่เว้นว่างจะใช้ข้อความเดิมของหน้าเว็บ การเปลี่ยนแปลงแสดงทันทีหลังบันทึก</p>
+      {!content && <Feedback message={message} />}
+      {content && (
+        <form onSubmit={save}>
+          <fieldset disabled={busy}>
+            <div className="student-fields">
+              <label className="field">
+                ชื่องาน (แถบบนทุกหน้า)
+                <input name="title" defaultValue={content.title} maxLength={150} />
+              </label>
+              <label className="field">
+                ชื่อศูนย์เครือข่าย (ใต้ชื่องาน)
+                <input name="subtitle" defaultValue={content.subtitle} maxLength={200} />
+              </label>
+            </div>
+            <label className="field">
+              ข้อความหัวเรื่องหน้าแรก (ขึ้นบรรทัดใหม่ได้)
+              <textarea name="hero" defaultValue={content.hero} maxLength={500} rows={3} />
+            </label>
+            <label className="field">
+              ข้อความประกาศวิ่ง
+              <input name="marquee" defaultValue={content.marquee} maxLength={500} />
+            </label>
+            <div className="student-fields">
+              <label className="field">
+                หัวข้อนับถอยหลัง
+                <input name="countdown_label" defaultValue={content.countdown_label} maxLength={100} />
+              </label>
+              <label className="field">
+                นับถอยหลังถึงวันเวลา
+                <input
+                  name="countdown_at"
+                  type="datetime-local"
+                  defaultValue={thaiDateInput(content.countdown_at)}
+                />
+              </label>
+            </div>
+            <h3>ข่าวประชาสัมพันธ์</h3>
+            {news.map((row, i) => (
+              <div className="admin-criterion admin-news" key={i}>
+                <label className="field">
+                  หัวข้อข่าว {i + 1}
+                  <input
+                    value={row.title}
+                    maxLength={300}
+                    required
+                    onChange={(e) => update(i, "title", e.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  วันที่
+                  <input type="date" value={row.date} onChange={(e) => update(i, "date", e.target.value)} />
+                </label>
+                <label className="field">
+                  ลิงก์ (ไม่บังคับ)
+                  <input
+                    value={row.url}
+                    maxLength={500}
+                    placeholder="https://"
+                    onChange={(e) => update(i, "url", e.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setNews((rows) => rows.filter((_, index) => index !== i))}
+                >
+                  ลบข่าวนี้
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="secondary"
+              disabled={news.length >= 50}
+              onClick={() =>
+                setNews((rows) => [
+                  { title: "", date: new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10), url: "" },
+                  ...rows,
+                ])
+              }
+            >
+              เพิ่มข่าว
+            </button>
+            <Feedback message={message} />
+            <div className="form-actions">
+              <button className="primary" type="submit">
+                บันทึกเนื้อหา
+              </button>
+            </div>
+          </fieldset>
+        </form>
+      )}
+    </section>
   );
 }

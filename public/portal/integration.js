@@ -2,7 +2,7 @@
 
 const page = document.body.dataset.page;
 const hash = location.hash.slice(1);
-const tabs = new Set(["admin", "scoring", "competitions", "mine", "review", "judging", "results", "certificates", "manage", "judges", "users", "account"]);
+const tabs = new Set(["admin", "scoring", "competitions", "mine", "review", "judging", "results", "certificates", "manage", "judges", "users", "portal", "trash", "account"]);
 const workspace = (tab) => tabs.has(tab) ? `/workspace#${tab}` : "/";
 const format = (value) => Number(value).toLocaleString("th-TH");
 
@@ -102,7 +102,7 @@ if (page === "home" && tabs.has(hash)) location.replace(workspace(hash));
 
 if (page === "login") {
   if (hash === "judging") document.querySelector('[data-type="report"]')?.click();
-  if (["admin", "scoring", "manage", "users", "judges"].includes(hash)) document.querySelector('[data-type="admin"]')?.click();
+  if (["admin", "scoring", "manage", "users", "judges", "portal", "trash"].includes(hash)) document.querySelector('[data-type="admin"]')?.click();
   document.querySelectorAll("[data-login]").forEach((form) => form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const submit = form.querySelector('button[type="submit"]');
@@ -126,8 +126,60 @@ if (page === "login") {
   request("/me").then(({ user }) => setAccountLinks(user)).catch(() => {});
 }
 
+function setText(selector, value) {
+  if (value) document.querySelectorAll(selector).forEach((node) => { node.textContent = value; });
+}
+
+// Text the admin edits in the back office; empty fields keep the page's own wording.
+function applyContent(content) {
+  setText(".logo-text", content.title);
+  setText(".logo-subtitle", content.subtitle);
+  if (page !== "home") return;
+  setText(".scrolling-text span", content.marquee);
+  const hero = document.querySelector(".hero-title");
+  if (hero && content.hero) {
+    hero.replaceChildren();
+    content.hero.split("\n").forEach((line, index) => {
+      if (index) hero.append(document.createElement("br"));
+      hero.append(line);
+    });
+  }
+  const timer = document.querySelector(".countdown-timer");
+  const target = Date.parse(content.countdown_at || "");
+  if (timer && Number.isFinite(target)) {
+    const label = timer.closest(".countdown-card")?.querySelector(".countdown-header span");
+    if (label && content.countdown_label) label.textContent = content.countdown_label;
+    const tick = () => {
+      const left = Math.max(0, Math.floor((target - Date.now()) / 1000));
+      const parts = { days: Math.floor(left / 86400), hours: Math.floor(left / 3600) % 24, minutes: Math.floor(left / 60) % 60, seconds: left % 60 };
+      for (const [name, value] of Object.entries(parts)) {
+        const node = timer.querySelector(`.time-value.${name}`);
+        if (node) node.textContent = format(value);
+      }
+    };
+    tick();
+    setInterval(tick, 1000);
+  }
+  const list = document.querySelector(".news-list");
+  if (list && content.news?.length) {
+    list.replaceChildren(...content.news.map((item) => {
+      const row = element("div", "", "news-list-item d-flex align-items-center gap-3 py-2 px-2");
+      const date = Date.parse(item.date || "");
+      if (Number.isFinite(date)) row.append(element("span", new Date(date).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" }), "badge bg-light text-primary news-date-box"));
+      const safe = typeof item.url === "string" && /^(https:\/\/|\/(?!\/))/.test(item.url);
+      const title = element(safe ? "a" : "span", item.title, "title-link text-decoration-none text-dark");
+      if (safe) title.href = item.url;
+      row.append(title);
+      return row;
+    }));
+  }
+}
+
+const portal = request("/portal");
+portal.then(({ content }) => applyContent(content || {})).catch(() => {});
+
 if (page === "home") {
-  request("/portal").then(({ stats, system_closed }) => {
+  portal.then(({ stats, system_closed }) => {
     if (system_closed) {
       document.querySelector(".scrolling-text span").textContent = "ระบบปิดใช้งานชั่วคราว";
       return;

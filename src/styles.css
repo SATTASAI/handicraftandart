@@ -1560,3 +1560,11 @@ details.panel summary {
     justify-self: end;
   }
 }
+.admin-news {
+  grid-template-columns: minmax(0, 2fr) 9.5rem minmax(0, 1.2fr) auto;
+}
+@media (max-width: 720px) {
+  .admin-news {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

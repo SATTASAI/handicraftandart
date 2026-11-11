@@ -1,4 +1,14 @@
-import { adminApi, cleanAdminFiles, queueFile } from "./admin.js";
+import {
+  adminApi,
+  cleanAdminFiles,
+  queueFile,
+  TRASH,
+  PORTAL_KEY,
+  dropTrashOf,
+  trashAfterReset,
+  trashEntry,
+  userSnapshot,
+} from "./admin.js";
 import { registrationsApi } from "./registrations.js";
 import { judgingApi } from "./judging.js";
 import { driveEnabled, deleteFiles } from "./drive.js";
@@ -139,6 +149,10 @@ async function api(r, env, ctx) {
     });
   if (path === "/api/portal" && r.method === "GET") {
     if (systemClosed) return json({ system_closed: true, stats: null });
+    const content = await db
+      .prepare("SELECT value FROM app_settings WHERE key=?")
+      .bind(PORTAL_KEY)
+      .first();
     const stats = await db.prepare(`
       SELECT
         (SELECT COUNT(*) FROM event_competitions) AS activities,
@@ -149,7 +163,11 @@ async function api(r, env, ctx) {
         (SELECT COUNT(DISTINCT s.school) FROM event_students s JOIN event_registrations r ON r.id=s.registration_id WHERE r.status='approved') AS schools,
         (SELECT COUNT(DISTINCT judge_id) FROM event_judges) AS judges
     `).first();
-    return json({ system_closed: false, stats });
+    return json({
+      system_closed: false,
+      stats,
+      content: content ? JSON.parse(content.value) : {},
+    });
   }
   if (
     systemClosed &&
@@ -447,7 +465,8 @@ async function api(r, env, ctx) {
         "DELETE FROM registration_documents",
         "DELETE FROM event_judges",
         "DELETE FROM event_competitions",
-        `DELETE FROM app_settings WHERE key<>'system_enabled' AND key NOT GLOB 'drive_folder:*' AND key NOT GLOB 'admin_delete_file:*' AND NOT (${pending})`,
+        ...trashAfterReset(true),
+        `DELETE FROM app_settings WHERE key<>'system_enabled' AND key<>'${PORTAL_KEY}' AND key NOT GLOB 'drive_folder:*' AND key NOT GLOB 'admin_delete_file:*' AND NOT (${pending})`,
         activationSql,
       ].map(sql => db.prepare(sql)));
     }
@@ -481,6 +500,7 @@ async function api(r, env, ctx) {
         "DELETE FROM event_students",
         "DELETE FROM event_registrations",
         "DELETE FROM registration_documents",
+        ...trashAfterReset(false),
       ].map((sql) => db.prepare(sql)),
     );
     if (driveEnabled(env)) await deleteFiles(env, driveIds);
@@ -499,11 +519,28 @@ async function api(r, env, ctx) {
       .first();
     if (!target) fail(404, "ไม่พบบัญชี");
     if (target.is_superadmin) fail(400, "ไม่สามารถลบบัญชี superadmin ได้");
-    if ((await body(r)).confirm !== "ลบถาวร") fail(400, "กรุณาพิมพ์คำยืนยันให้ถูกต้อง");
+    const confirm = (await body(r)).confirm;
+    // "ถังขยะ" keeps a restorable copy and the ID images; "ลบถาวร" removes everything now.
+    const trash = confirm === TRASH;
+    if (!trash && confirm !== "ลบถาวร") fail(400, "กรุณาพิมพ์คำยืนยันให้ถูกต้อง");
     const own = "SELECT id FROM event_registrations WHERE owner_id=?1";
-    await db.batch(
-      [
-        queueFile(`SELECT drive_file_id AS id FROM registration_documents WHERE owner_id=?1
+    const snapshot = trash ? await userSnapshot(db, id) : null;
+    await db.batch([
+      ...(trash
+        ? [
+            trashEntry(
+              db,
+              user,
+              "user",
+              `บัญชี ${snapshot.user.name} · ${snapshot.user.school}`,
+              snapshot,
+              "SELECT 1 FROM account_users WHERE id=? AND is_superadmin=0",
+              id,
+            ),
+          ]
+        : []),
+      ...[
+        queueFile(`SELECT drive_file_id AS id FROM registration_documents WHERE owner_id=?1 AND ${trash ? 0 : 1}=1
           UNION SELECT drive_file_id FROM certificate_files WHERE unit_key IN
           (SELECT 'student.'||id FROM (${own}) UNION SELECT 'coach.'||id FROM (${own}))
           OR unit_key='judge.'||competition_id||'.'||?1`),
@@ -516,7 +553,10 @@ async function api(r, env, ctx) {
         `DELETE FROM event_students WHERE registration_id IN (${own})`,
         "DELETE FROM event_registrations WHERE owner_id=?1",
         "UPDATE event_registrations SET reviewed_by=?2 WHERE reviewed_by=?1",
-        "DELETE FROM registration_documents WHERE owner_id=?1",
+        trash
+          ? "UPDATE registration_documents SET owner_id=?2 WHERE owner_id=?1"
+          : "DELETE FROM registration_documents WHERE owner_id=?1",
+        ...(trash ? [] : [dropTrashOf]),
         "DELETE FROM event_judges WHERE judge_id=?1",
         "UPDATE event_judges SET assigned_by=?2 WHERE assigned_by=?1",
         "UPDATE event_competitions SET created_by=?2 WHERE created_by=?1",
@@ -528,7 +568,7 @@ async function api(r, env, ctx) {
       ].map((sql) =>
         db.prepare(sql).bind(...(sql.includes("?2") ? [id, user.id] : [id])),
       ),
-    );
+    ]);
     return json({ ok: true, remaining: await cleanAdminFiles(env) });
   }
   fail(404, "ไม่พบรายการที่ร้องขอ");

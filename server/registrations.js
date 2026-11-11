@@ -1,4 +1,4 @@
-import { cleanAdminFiles, holdResultsFor, queueFile } from "./admin.js";
+import { cleanAdminFiles, docNotInTrash, holdResultsFor, queueFile } from "./admin.js";
 import { activationSql } from "./catalog.js";
 import { now, digest, publicUser } from "./security.js";
 import { driveEnabled, uploadFile, downloadFile, deleteFiles } from "./drive.js";
@@ -308,7 +308,7 @@ export async function registrationsApi(
       id = crypto.randomUUID();
     const stale = await db
       .prepare(
-        "DELETE FROM registration_documents WHERE owner_id=? AND created_at<? AND NOT EXISTS(SELECT 1 FROM event_students s WHERE s.document_id=registration_documents.id) RETURNING drive_file_id",
+        `DELETE FROM registration_documents WHERE owner_id=? AND created_at<? AND NOT EXISTS(SELECT 1 FROM event_students s WHERE s.document_id=registration_documents.id) AND ${docNotInTrash} RETURNING drive_file_id`,
       )
       .bind(user.id, now() - 86400)
       .all();
@@ -388,7 +388,7 @@ export async function registrationsApi(
       if (doc.owner_id !== user.id) fail(403, "เฉพาะเจ้าของเอกสารเท่านั้น");
       const result = await db
         .prepare(
-          "DELETE FROM registration_documents WHERE id=? AND owner_id=? AND NOT EXISTS(SELECT 1 FROM event_students WHERE document_id=?) RETURNING drive_file_id",
+          `DELETE FROM registration_documents WHERE id=? AND owner_id=? AND NOT EXISTS(SELECT 1 FROM event_students WHERE document_id=?) AND ${docNotInTrash} RETURNING drive_file_id`,
         )
         .bind(id, user.id, id)
         .all();
