@@ -143,7 +143,7 @@ fieldset {
   width: min(100%, 1000px);
   display: grid;
   grid-template-columns: 1fr 1fr;
-  background: white;
+  background: var(--white);
   border: 1px solid var(--line);
   border-radius: 24px;
   overflow: hidden;
@@ -237,7 +237,7 @@ fieldset {
   font-size: 14px;
 }
 .auth-switch a.active {
-  background: white;
+  background: var(--white);
   color: var(--blue);
   box-shadow: 0 1px 4px #183d7820;
 }
@@ -264,7 +264,7 @@ fieldset {
   height: 50px;
   border: 1px solid #ccd8e9;
   border-radius: 12px;
-  background: white;
+  background: var(--white);
   padding: 10px 14px;
   color: var(--ink);
   font-size: 16px;
@@ -327,7 +327,7 @@ fieldset {
   color: white;
 }
 .secondary {
-  background: white;
+  background: var(--white);
   border: 1px solid #cbd8e9;
   color: #234a82;
 }
@@ -343,7 +343,7 @@ fieldset {
 }
 .danger-button {
   width: 100%;
-  background: white;
+  background: var(--white);
   border: 1px solid #f0cdd2;
   color: #b0263a;
   margin-top: 18px;
@@ -609,7 +609,7 @@ fieldset {
   }
 }
 .sheet-body {
-  background: white;
+  background: var(--white);
   border-radius: 22px 22px 0 0;
   padding: 8px 16px calc(18px + var(--safe-b));
   max-height: 85dvh;
@@ -718,7 +718,7 @@ fieldset {
   align-items: flex-start;
   gap: 2px;
   text-align: left;
-  background: white;
+  background: var(--white);
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
   padding: 14px;
@@ -753,7 +753,7 @@ fieldset {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: white;
+  background: var(--white);
   border: 1px dashed #a9c4ee;
   border-radius: var(--radius-m);
   padding: 14px;
@@ -778,7 +778,7 @@ fieldset {
   list-style: none;
   margin: 0;
   padding: 0;
-  background: white;
+  background: var(--white);
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
   overflow: hidden;
@@ -793,7 +793,7 @@ fieldset {
   gap: 12px;
   padding: 13px 14px;
   width: 100%;
-  background: white;
+  background: var(--white);
   border: 0;
   text-align: left;
   color: var(--ink);
@@ -913,7 +913,7 @@ button.list-row > .icon:last-child {
 
 /* ---------- Shared bits ---------- */
 .panel {
-  background: white;
+  background: var(--white);
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
   padding: 18px;
@@ -991,7 +991,7 @@ th {
   position: fixed;
   top: 10px;
   left: 15px;
-  background: white;
+  background: var(--white);
   padding: 10px;
   z-index: 50;
   clip-path: inset(50%);
@@ -1018,7 +1018,7 @@ th {
     position: sticky;
     top: 0;
     height: 100dvh;
-    background: white;
+    background: var(--white);
     border-right: 1px solid var(--line);
     padding: 18px 12px;
   }
@@ -1142,7 +1142,7 @@ th {
   .public-screen {
     padding: 0;
     place-items: stretch;
-    background: white;
+    background: var(--white);
   }
   .auth-screen {
     display: flex;
@@ -1194,7 +1194,7 @@ textarea {
   width: 100%;
   min-height: 50px;
   border: 1px solid #ccd8e9;
-  background: #fff;
+  background: var(--white);
   border-radius: 12px;
   padding: 10px 14px;
   font-size: 16px;
@@ -1570,4 +1570,274 @@ details.panel summary {
 }
 .turnstile-box:not(:empty) {
   margin-block: .75rem;
+}
+
+/* ---------- Portal theme: the workspace shares the public site's look ---------- */
+:root {
+  --blue: #4154f1;
+  --blue-deep: #012970;
+  --ink: #012970;
+  --ink-soft: #6b7a99;
+  --sky: #eef1ff;
+  --surface: #f6f9ff;
+  --line: #e3e8f5;
+  --bar-h: 60px;
+  --card-shadow: 0 0 30px rgba(1, 41, 112, 0.1);
+  --gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --control: var(--white);
+  --control-line: #ccd8e9;
+  font-family: "Prompt", "Noto Sans Thai", "Leelawadee UI", Thonburi, Tahoma, sans-serif;
+  color: #444;
+}
+h1,
+h2,
+h3 {
+  color: var(--ink);
+}
+.brand-logo {
+  height: 38px;
+  width: auto;
+  flex-shrink: 0;
+}
+.welcome-brand .brand-logo {
+  height: 46px;
+}
+.splash .brand-logo {
+  height: 64px;
+}
+.app-bar {
+  background: var(--white);
+  color: var(--ink);
+  border-bottom: 0;
+  box-shadow: 0 2px 20px rgba(1, 41, 112, 0.1);
+}
+.app-bar::after {
+  display: none;
+}
+.app-bar-title strong {
+  font-weight: 600;
+}
+.app-bar-title small {
+  color: var(--ink-soft);
+  opacity: 1;
+}
+.app-bar .avatar {
+  background: var(--sky);
+  color: var(--blue);
+  border: 0;
+}
+.bar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.bar-actions .avatar-button {
+  margin-left: 0;
+}
+.bar-link,
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.bar-link:hover,
+.theme-toggle:hover {
+  background: var(--sky);
+  color: var(--blue);
+}
+.bar-link span {
+  display: none;
+}
+.primary,
+.secondary,
+.danger-button {
+  border-radius: 999px;
+}
+.primary,
+.primary:hover {
+  background: var(--gradient) border-box;
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(99, 102, 241, 0.35);
+}
+.primary:hover {
+  opacity: 0.9;
+}
+.secondary {
+  border-color: var(--control-line);
+  color: var(--ink);
+}
+.field input,
+.field select,
+.field textarea,
+.filter-label select {
+  background: var(--control);
+  border-color: var(--control-line);
+  color: inherit;
+}
+.panel,
+.tile,
+.list-group {
+  border-color: transparent;
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+}
+.hello-card,
+.welcome {
+  background: linear-gradient(135deg, #eef1ff 0%, #f6f9ff 60%, #efe9fb 100%);
+}
+.hello-card::after,
+.welcome::after {
+  background: var(--gradient);
+  height: 4px;
+}
+.nav-item.active,
+.bottom-nav .nav-item.active .icon {
+  color: var(--blue);
+}
+.admin-intro {
+  border-top-color: var(--blue);
+}
+.text-link,
+.competition-rules summary {
+  color: var(--blue);
+}
+@media (min-width: 960px) {
+  .sidebar {
+    border-right: 0;
+    box-shadow: 0 0 20px rgba(1, 41, 112, 0.1);
+    z-index: 21;
+    background: var(--white);
+  }
+  .sidebar-brand strong {
+    font-size: 15px;
+    color: var(--ink);
+    line-height: 1.35;
+  }
+  .sidebar-nav .nav-item {
+    color: var(--ink);
+    border-radius: 8px;
+  }
+  .sidebar-nav .nav-item:hover,
+  .sidebar-nav .nav-item.active {
+    background: var(--surface);
+    color: var(--blue);
+  }
+  .nav-group {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #899bbd;
+  }
+  .app-bar .brand-logo {
+    display: none;
+  }
+  .app-bar .avatar {
+    display: grid;
+  }
+  .bar-link span {
+    display: inline;
+  }
+}
+
+/* Night mode: shares the public site's saved preference. */
+:root.dark-mode {
+  --white: #243242;
+  --surface: #212529;
+  --ink: #e9ecef;
+  --ink-soft: #a9b4c0;
+  --line: #2c3b4c;
+  --sky: #2c3b4c;
+  --blue: #6ea4ff;
+  --blue-deep: #9ec1ff;
+  --control: #1b2530;
+  --control-line: #3a4a5c;
+  --card-shadow: 0 0 30px rgba(0, 0, 0, 0.3);
+  color: #c8d0d8;
+  color-scheme: dark;
+}
+.dark-mode .hello-card,
+.dark-mode .welcome {
+  background: linear-gradient(135deg, #243242 0%, #2c3b4c 100%);
+}
+.dark-mode .secondary {
+  background: transparent;
+  color: #cfe0ff;
+}
+.dark-mode .danger-button {
+  background: transparent;
+  border-color: #6b2a35;
+  color: #ff9aa8;
+}
+.dark-mode .nav-item {
+  color: var(--ink-soft);
+}
+.dark-mode .nav-item.active,
+.dark-mode .sidebar-nav .nav-item:hover {
+  color: var(--blue);
+}
+.dark-mode .bottom-nav {
+  background: #243242eb;
+}
+.dark-mode .welcome-note {
+  background: #ffffff14;
+  border-color: var(--control-line);
+}
+.dark-mode .welcome > p,
+.dark-mode .welcome-note p,
+.dark-mode .notice p,
+.dark-mode .muted,
+.dark-mode dt,
+.dark-mode th,
+.dark-mode .field small,
+.dark-mode .role-option small,
+.dark-mode .role-group legend span,
+.dark-mode .privacy-note,
+.dark-mode .password-input button {
+  color: var(--ink-soft);
+}
+.dark-mode th,
+.dark-mode .student-card,
+.dark-mode .competition-rules,
+.dark-mode .admin-stats > div,
+.dark-mode .badge {
+  background: #2c3b4c;
+  border-color: var(--control-line);
+  color: #e9ecef;
+}
+.dark-mode .role-option,
+.dark-mode .review-controls,
+.dark-mode .identity-preview img,
+.dark-mode .install-card,
+.dark-mode .list-group > .list-row + .list-row {
+  border-color: var(--control-line);
+}
+.dark-mode button.list-row:hover,
+.dark-mode .auth-switch a.active {
+  background: #2c3b4c;
+}
+.dark-mode .sheet-handle,
+.dark-mode .switch input {
+  background: #3a4a5c;
+}
+.dark-mode .error {
+  background: #3a1f25;
+  border-color: #6b2a35;
+  color: #ffb3bd;
+}
+.dark-mode .success-message {
+  background: #1d3a2b;
+  border-color: #2f6b4a;
+  color: #a6e3c0;
 }
