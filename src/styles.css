@@ -2024,3 +2024,18 @@ body {
 .bottom-nav .nav-item.active .dock-avatar {
   box-shadow: 0 0 0 1.5px var(--white), 0 0 0 3px currentColor;
 }
+
+/* Tab changes cross-fade; the top bar and dock stay put instead of flashing. */
+.app-bar {
+  view-transition-name: ws-bar;
+}
+.bottom-nav {
+  view-transition-name: ws-dock;
+}
+.sidebar {
+  view-transition-name: ws-sidebar;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.16s;
+}

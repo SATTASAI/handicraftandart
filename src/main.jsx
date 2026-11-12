@@ -3,6 +3,7 @@ import { LoginLog, SecurityPanel, useTurnstile } from "./components/Security";
 import CompetitionRegistration from "./components/CompetitionRegistration";
 import Icon from "./components/Icon";
 import React, { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { api } from "./api";
 import "./styles.css";
@@ -1076,17 +1077,21 @@ function Shell({ user, onLogout, busy }) {
   useEffect(() => {
     document.title = current.label + " · ศิลปหัตถกรรม";
   }, [current.key]);
+  // Tabs switch inside the app (home included), with a short cross-fade where the
+  // browser supports view transitions, so the page never reloads or flashes.
   function navigate(key) {
     sheet.current?.close();
-    if (key === "home") {
-      go("/");
-      return;
-    }
-    if (key !== tab) {
-        history.pushState({}, "", `/workspace#${key}`);
-      setTab(key);
-    }
-    window.scrollTo({ top: 0 });
+    const change = () => {
+      if (key !== tab) {
+        history.pushState({}, "", key === "home" ? "/workspace" : `/workspace#${key}`);
+        setTab(key);
+      }
+      window.scrollTo({ top: 0 });
+    };
+    const calm = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (key !== tab && document.startViewTransition && !calm)
+      document.startViewTransition(() => flushSync(change));
+    else change();
     document.getElementById("main")?.focus({ preventScroll: true });
   }
   const primary = ["mine", "judging", "review"].find((k) =>

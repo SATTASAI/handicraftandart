@@ -17,7 +17,6 @@
   position: absolute;
   height: auto;
   pointer-events: none;
-  will-change: transform, opacity, clip-path;
 }
 .hca-title { left: 9.438%; top: 19.337%; width: 71.593%; animation: hca-wipe 1.2s cubic-bezier(.3, .7, .2, 1) .35s both; }
 .hca-num { left: 75.506%; top: 20.718%; width: 16.805%; animation: hca-pop 1s cubic-bezier(.2, 1.4, .4, 1) 1.25s both, hca-glow 3.2s ease-in-out 2.6s infinite; }
@@ -60,10 +59,10 @@
 .hca-spark-8 { left: 78.5%; top: 69%; --d: 2.45s; }
 
 @keyframes hca-zoom { from { transform: scale(1.06); opacity: .6; } to { transform: none; opacity: 1; } }
+/* Transform and opacity only, so the GPU animates it without repainting. */
 @keyframes hca-wipe {
-  from { clip-path: inset(0 100% 0 0); opacity: 0; transform: translateY(6%); }
-  40% { opacity: 1; }
-  to { clip-path: inset(0 0 0 0); opacity: 1; transform: none; }
+  from { opacity: 0; transform: translate3d(-4%, 6%, 0) scale(.96); }
+  to { opacity: 1; transform: none; }
 }
 @keyframes hca-pop { from { opacity: 0; transform: scale(1.8) rotate(-8deg); } to { opacity: 1; transform: none; } }
 @keyframes hca-glow { 0%, 100% { filter: drop-shadow(0 0 0 rgba(255, 210, 90, 0)); } 50% { filter: drop-shadow(0 0 10px rgba(255, 210, 90, .85)); } }

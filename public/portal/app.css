@@ -357,3 +357,23 @@ body.dark-mode .home-hero .hero-title {
     grid-template-columns: 1fr;
   }
 }
+
+/* Page changes cross-fade like an app; the header and tab bar stay in place. */
+@view-transition {
+  navigation: auto;
+}
+#header {
+  view-transition-name: portal-header;
+}
+.app-tabs {
+  view-transition-name: portal-tabs;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: .16s;
+}
+@media (prefers-reduced-motion: reduce) {
+  @view-transition {
+    navigation: none;
+  }
+}

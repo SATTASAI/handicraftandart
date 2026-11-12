@@ -1,6 +1,6 @@
 // Service worker: caches only the public app shell and hashed build assets.
 // Never caches /api/ responses, rule PDFs or anything authenticated.
-const CACHE = "hca-shell-v9";
+const CACHE = "hca-shell-v10";
 const SHELL = ["/", "/workspace", "/manifest.webmanifest", "/icons/icon-192.png"];
 
 self.addEventListener("install", (event) => {
@@ -65,6 +65,26 @@ self.addEventListener("fetch", (event) => {
             }
             return response;
           }),
+      ),
+    );
+    return;
+  }
+
+  // Public portal styles, scripts, fonts and images: answer from the cache at once,
+  // refresh it in the background so the next visit gets any update.
+  if (url.pathname.startsWith("/portal/") && !/\.html?$/i.test(url.pathname)) {
+    event.respondWith(
+      caches.open(CACHE).then((cache) =>
+        cache.match(request).then((hit) => {
+          const fresh = fetch(request)
+            .then((response) => {
+              if (response.ok) cache.put(request, response.clone());
+              return response;
+            })
+            .catch(() => hit || Response.error());
+          if (hit) event.waitUntil(fresh.catch(() => {}));
+          return hit || fresh;
+        }),
       ),
     );
   }
