@@ -113,6 +113,18 @@ document.addEventListener("keydown", (event) => {
     link.append(i);
     nav.append(link);
   }
+  // Show the tapped tab as selected straight away, before the next page loads.
+  nav.addEventListener("pointerdown", (event) => {
+    const link = event.target.closest("a");
+    if (!link || link.hash === "#portalMenu") return;
+    nav.querySelectorAll("a").forEach((other, index) => {
+      const selected = other === link;
+      other.toggleAttribute("aria-current", selected);
+      if (selected) other.setAttribute("aria-current", "page");
+      const icon = other.querySelector("i.bi");
+      if (icon && items[index]) icon.className = "bi " + (selected ? items[index][2] : items[index][1]);
+    });
+  });
   document.body.append(nav);
 })();
 
@@ -413,3 +425,6 @@ if (page === "student" || page === "competition_criteria") {
     }));
   }).catch((error) => showStatus(placeholder, error, "competitions"));
 }
+
+// Cache the portal's static files for faster page changes (same worker the app uses).
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});

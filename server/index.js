@@ -48,6 +48,17 @@ const cookieName = (r) =>
   new URL(r.url).protocol === "https:" ? "__Host-ha_session" : "ha_session";
 const sessionCookie = (r, token, age = 604800) =>
   `${cookieName(r)}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${age}${new URL(r.url).protocol === "https:" ? "; Secure" : ""}`;
+// Browser caching for public static files so moving between pages does not
+// re-check every stylesheet, script and font. Pages, the API and PDFs are untouched.
+export function staticCache(pathname) {
+  if (pathname.startsWith("/api/") || /\.(pdf|html?)\/?$/i.test(pathname)) return null;
+  if (pathname.startsWith("/assets/")) return "public, max-age=31536000, immutable";
+  if (/^\/portal\/(assets\/vendor\/|media\/fonts\/)/.test(pathname) || /\.woff2?$/i.test(pathname))
+    return "public, max-age=2592000";
+  if (/^\/(portal|icons)\/.+\.(css|js|webp|png|jpe?g|svg|ico)$/i.test(pathname))
+    return "public, max-age=600, stale-while-revalidate=86400";
+  return null;
+}
 export function portalAssetPath(pathname) {
   if (pathname === "/" || pathname === "/index.php") return "/portal/home.html";
   if (pathname === "/login" || pathname === "/login.html") return "/portal/login.html";
@@ -839,6 +850,8 @@ export default {
       );
     }
     const headers = new Headers(response.headers);
+    const cache = response.status === 200 && r.method === "GET" ? staticCache(new URL(r.url).pathname) : null;
+    if (cache) headers.set("Cache-Control", cache);
     headers.set("X-Content-Type-Options", "nosniff");
     headers.set("Referrer-Policy", "same-origin");
     headers.set("X-Frame-Options", "DENY");
