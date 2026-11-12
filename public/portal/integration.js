@@ -87,12 +87,43 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+// Phone tab bar shared by every portal page.
+(function appTabs() {
+  if (page === "login") return;
+  const items = [
+    ["/", "bi-house-door", "หน้าหลัก", page === "home"],
+    ["/portal/reportannounce.html", "bi-trophy", "ผลแข่งขัน", page === "reportannounce"],
+    ["/portal/competition_criteria.html", "bi-journal-text", "เกณฑ์", page === "competition_criteria"],
+    [page === "home" ? "#portalMenu" : "/#portalMenu", "bi-grid", "เมนู", false],
+    ["/login", "bi-person-circle", "เข้าสู่ระบบ", false],
+  ];
+  const nav = document.createElement("nav");
+  nav.className = "app-tabs";
+  nav.setAttribute("aria-label", "เมนูลัด");
+  for (const [href, icon, label, active] of items) {
+    const link = document.createElement("a");
+    link.href = href;
+    if (active) link.setAttribute("aria-current", "page");
+    const i = document.createElement("i");
+    i.className = "bi " + icon;
+    i.setAttribute("aria-hidden", "true");
+    link.append(i, element("span", label));
+    nav.append(link);
+  }
+  document.body.append(nav);
+})();
+
 function setAccountLinks(user) {
   if (!user) return;
   document.querySelectorAll('a[href="/login"]').forEach((link) => {
     link.href = workspace("account");
     const icon = link.querySelector("i");
     link.replaceChildren();
+    if (link.closest(".app-tabs")) {
+      if (icon) link.append(icon);
+      link.append(element("span", "บัญชี"));
+      return;
+    }
     if (icon) link.append(icon, " ");
     link.append("บัญชีของฉัน");
   });

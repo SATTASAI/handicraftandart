@@ -8,7 +8,7 @@ body[data-page='form'] #dynamic-content { max-width: 1024px; margin-inline: auto
 body[data-page='result'] { font-family: Prompt, sans-serif; }
 
 @media (max-width: 767.98px) {
-  body[data-page='home'] #main .mb-4:has(> #heroBanner),
+  body[data-page='home'] #main .mb-4:has(> #hcaBanner),
   body[data-page='home'] .announcement-bar { margin-bottom: 15px !important; }
 }
 
