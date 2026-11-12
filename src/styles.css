@@ -1928,3 +1928,74 @@ body {
     padding-inline: 28px;
   }
 }
+
+/* Bottom dock, Instagram-style: icons only, filled icon on the current page, profile circle last. */
+:root {
+  --dock-h: 50px;
+}
+.bottom-nav,
+.dark-mode .bottom-nav {
+  grid-auto-columns: 1fr;
+  padding: 0 4px var(--safe-b);
+  box-shadow: none;
+  border-top: 0.5px solid rgba(0, 0, 0, 0.15);
+}
+.dark-mode .bottom-nav {
+  background: #000;
+  border-top-color: rgba(255, 255, 255, 0.15);
+}
+.bottom-nav .nav-item,
+.bottom-nav .nav-item.active,
+.bottom-nav .nav-item:hover {
+  color: #000;
+  padding: 0;
+  min-height: 0;
+  transition: transform 0.08s, opacity 0.12s;
+}
+.dark-mode .bottom-nav .nav-item,
+.dark-mode .bottom-nav .nav-item.active,
+.dark-mode .bottom-nav .nav-item:hover {
+  color: #fff;
+}
+.bottom-nav .nav-item:active {
+  transform: scale(0.88);
+  opacity: 0.6;
+}
+.bottom-nav .nav-item .icon,
+.bottom-nav .nav-item.active .icon {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  stroke-width: 1.7;
+}
+.bottom-nav .nav-item.active .icon {
+  stroke-width: 2.3;
+}
+/* Solid shapes for the current page, like Instagram's filled icons. */
+.bottom-nav .nav-item.active .icon:is(
+    [data-icon="home"],
+    [data-icon="grid"],
+    [data-icon="star"],
+    [data-icon="trophy"],
+    [data-icon="award"],
+    [data-icon="user"],
+    [data-icon="users"]
+  ) {
+  fill: currentColor;
+}
+.dock-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+.bottom-nav .nav-item.active .dock-avatar {
+  box-shadow: 0 0 0 1.5px var(--white), 0 0 0 3px currentColor;
+}

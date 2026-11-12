@@ -9,7 +9,7 @@
   --app-bg: #f4f6fb;
   --app-radius: 18px;
   --app-shadow: 0 6px 24px rgba(1, 41, 112, .07);
-  --app-tab-h: 64px;
+  --app-tab-h: 50px;
 }
 body {
   background: var(--app-bg);
@@ -244,7 +244,7 @@ body.dark-mode .home-hero .hero-title {
     padding-bottom: 8px !important;
   }
 
-  /* Bottom tab bar. */
+  /* Bottom tab bar, Instagram-style: icons only, filled icon for the current page. */
   .app-tabs {
     position: fixed;
     z-index: 1030;
@@ -254,58 +254,53 @@ body.dark-mode .home-hero .hero-title {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
     height: calc(var(--app-tab-h) + env(safe-area-inset-bottom));
-    padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
-    /* Solid background: a live blur under a fixed bar makes iPhone scrolling stutter. */
+    padding: 0 4px env(safe-area-inset-bottom);
     background: var(--app-card);
-    border-top: 1px solid var(--app-line);
-    box-shadow: 0 -4px 18px rgba(1, 41, 112, .06);
+    border-top: .5px solid rgba(0, 0, 0, .15);
     transform: translateZ(0);
+  }
+  body.dark-mode .app-tabs {
+    background: #000;
+    border-top-color: rgba(255, 255, 255, .15);
   }
   .app-tabs a {
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 3px;
-    border-radius: 14px;
-    color: var(--app-soft) !important;
-    font-size: 11px;
-    font-weight: 500;
-    line-height: 1.2;
+    color: #000 !important;
     text-decoration: none;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     /* Respond on the first tap: no double-tap zoom delay or grey flash. */
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
     -webkit-user-select: none;
     user-select: none;
-    min-height: 48px;
-    transition: transform .08s, background-color .12s;
+    transition: transform .08s, opacity .12s;
+  }
+  body.dark-mode .app-tabs a {
+    color: #fff !important;
   }
   .app-tabs a:active {
-    transform: scale(.94);
-    background: rgba(65, 84, 241, .08);
+    transform: scale(.88);
+    opacity: .6;
   }
   .app-tabs a * {
     pointer-events: none;
   }
   .app-tabs a i {
-    font-size: 21px;
+    font-size: 25px;
     line-height: 1;
   }
-  .app-tabs a[aria-current="page"] {
-    color: var(--app-indigo) !important;
+  .tab-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    font-size: 13px;
     font-weight: 600;
-  }
-  .app-tabs a[aria-current="page"] i {
-    background: rgba(65, 84, 241, .12);
-    border-radius: 999px;
-    padding: 3px 16px;
-  }
-  body.dark-mode .app-tabs a[aria-current="page"] {
-    color: #8fb2ff !important;
+    box-shadow: 0 0 0 1.5px var(--app-card), 0 0 0 2.5px rgba(0, 0, 0, .2);
   }
 }
 @media (max-width: 991.98px) {
