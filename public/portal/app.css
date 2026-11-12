@@ -255,10 +255,11 @@ body.dark-mode .home-hero .hero-title {
     grid-template-columns: repeat(5, 1fr);
     height: calc(var(--app-tab-h) + env(safe-area-inset-bottom));
     padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
-    background: color-mix(in srgb, var(--app-card) 92%, transparent);
-    backdrop-filter: blur(16px) saturate(1.4);
-    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    /* Solid background: a live blur under a fixed bar makes iPhone scrolling stutter. */
+    background: var(--app-card);
     border-top: 1px solid var(--app-line);
+    box-shadow: 0 -4px 18px rgba(1, 41, 112, .06);
+    transform: translateZ(0);
   }
   .app-tabs a {
     display: flex;
@@ -275,6 +276,20 @@ body.dark-mode .home-hero .hero-title {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    /* Respond on the first tap: no double-tap zoom delay or grey flash. */
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+    min-height: 48px;
+    transition: transform .08s, background-color .12s;
+  }
+  .app-tabs a:active {
+    transform: scale(.94);
+    background: rgba(65, 84, 241, .08);
+  }
+  .app-tabs a * {
+    pointer-events: none;
   }
   .app-tabs a i {
     font-size: 21px;
@@ -291,6 +306,36 @@ body.dark-mode .home-hero .hero-title {
   }
   body.dark-mode .app-tabs a[aria-current="page"] {
     color: #8fb2ff !important;
+  }
+}
+@media (max-width: 991.98px) {
+  /* Keep the back-to-top button clear of the tab bar. */
+  .back-to-top {
+    bottom: calc(var(--app-tab-h) + env(safe-area-inset-bottom) + 12px) !important;
+    right: 14px !important;
+    border-radius: 50% !important;
+    z-index: 1029 !important;
+  }
+  /* Scrolling performance on phones: no glass blur, hover lifts or endless shimmer. */
+  .glass-card,
+  .cookie-banner,
+  .header,
+  .sidebar-card {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .glass-card {
+    background: var(--app-card) !important;
+    transition: none !important;
+  }
+  .hca-shine {
+    display: none;
+  }
+  .hca-num {
+    animation: hca-pop 1s cubic-bezier(.2, 1.4, .4, 1) 1.25s both !important;
+  }
+  html {
+    scroll-behavior: auto !important;
   }
 }
 @media (min-width: 992px) {

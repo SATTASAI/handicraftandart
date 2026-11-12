@@ -1885,10 +1885,27 @@ body {
   font-size: 22px;
   font-weight: 600;
 }
-.bottom-nav {
-  background: color-mix(in srgb, var(--white) 92%, transparent);
-  backdrop-filter: blur(16px) saturate(1.4);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+/* Solid bar, instant taps: blur under a fixed bar makes iPhone scrolling stutter. */
+.bottom-nav,
+.dark-mode .bottom-nav {
+  background: var(--white);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: 0 -4px 18px rgba(1, 41, 112, 0.06);
+  transform: translateZ(0);
+}
+.bottom-nav .nav-item {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  min-height: 48px;
+}
+.bottom-nav .nav-item > * {
+  pointer-events: none;
+}
+.app-bar {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .nav-item {
   font-weight: 500;
