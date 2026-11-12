@@ -1092,10 +1092,12 @@ function Shell({ user, onLogout, busy }) {
   const primary = ["mine", "judging", "review"].find((k) =>
     sections.some((s) => s.key === k),
   );
-  const dock = ["home", "competitions", primary, "results"]
+  // Instagram-style dock: three shortcuts, the full menu, then the profile circle.
+  const dock = ["home", "competitions", primary || "results"]
     .filter(Boolean)
-    .map((k) => sections.find((s) => s.key === k));
-  const inDock = dock.some((s) => s.key === tab);
+    .map((k) => sections.find((s) => s.key === k))
+    .filter(Boolean);
+  const inDock = tab === "account" || dock.some((s) => s.key === tab);
   const navItem = (s, compact) => (
     <a
       key={s.key}
@@ -1198,15 +1200,46 @@ function Shell({ user, onLogout, busy }) {
         </main>
       </div>
       <nav className="bottom-nav" aria-label="เมนูหลัก">
-        {dock.map((s) => navItem(s, true))}
+        {dock.map((s) => (
+          <a
+            key={s.key}
+            href={"#" + s.key}
+            className={"nav-item" + (s.key === tab ? " active" : "")}
+            aria-current={s.key === tab ? "page" : undefined}
+            aria-label={s.label}
+            title={s.label}
+            onClick={(e) => {
+              e.preventDefault();
+              navigate(s.key);
+            }}
+          >
+            <Icon name={s.icon} size={26} />
+          </a>
+        ))}
         <button
           className={"nav-item" + (!inDock ? " active" : "")}
           onClick={() => sheet.current?.showModal()}
           aria-haspopup="dialog"
+          aria-label="เมนูทั้งหมด"
+          title="เมนูทั้งหมด"
         >
-          <Icon name="menu" />
-          <span>เมนู</span>
+          <Icon name="grid" size={26} />
         </button>
+        <a
+          href="#account"
+          className={"nav-item" + (tab === "account" ? " active" : "")}
+          aria-current={tab === "account" ? "page" : undefined}
+          aria-label="บัญชีของฉัน"
+          title="บัญชีของฉัน"
+          onClick={(e) => {
+            e.preventDefault();
+            navigate("account");
+          }}
+        >
+          <span className="dock-avatar" aria-hidden="true">
+            {user.name.trim().charAt(0)}
+          </span>
+        </a>
       </nav>
       <dialog
         ref={sheet}

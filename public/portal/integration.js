@@ -90,24 +90,27 @@ document.addEventListener("keydown", (event) => {
 // Phone tab bar shared by every portal page.
 (function appTabs() {
   if (page === "login") return;
+  // Instagram-style: icons only, the current page shows the filled icon.
   const items = [
-    ["/", "bi-house-door", "หน้าหลัก", page === "home"],
-    ["/portal/reportannounce.html", "bi-trophy", "ผลแข่งขัน", page === "reportannounce"],
-    ["/portal/competition_criteria.html", "bi-journal-text", "เกณฑ์", page === "competition_criteria"],
-    [page === "home" ? "#portalMenu" : "/#portalMenu", "bi-grid", "เมนู", false],
-    ["/login", "bi-person-circle", "เข้าสู่ระบบ", false],
+    ["/", "bi-house-door", "bi-house-door-fill", "หน้าหลัก", page === "home"],
+    ["/portal/reportannounce.html", "bi-trophy", "bi-trophy-fill", "ผลการแข่งขัน", page === "reportannounce"],
+    ["/portal/competition_criteria.html", "bi-journal-bookmark", "bi-journal-bookmark-fill", "เกณฑ์การแข่งขัน", page === "competition_criteria"],
+    [page === "home" ? "#portalMenu" : "/#portalMenu", "bi-grid", "bi-grid-fill", "เมนูทั้งหมด", false],
+    ["/login", "bi-person-circle", "bi-person-circle", "เข้าสู่ระบบ", false],
   ];
   const nav = document.createElement("nav");
   nav.className = "app-tabs";
   nav.setAttribute("aria-label", "เมนูลัด");
-  for (const [href, icon, label, active] of items) {
+  for (const [href, icon, filled, label, active] of items) {
     const link = document.createElement("a");
     link.href = href;
+    link.setAttribute("aria-label", label);
+    link.title = label;
     if (active) link.setAttribute("aria-current", "page");
     const i = document.createElement("i");
-    i.className = "bi " + icon;
+    i.className = "bi " + (active ? filled : icon);
     i.setAttribute("aria-hidden", "true");
-    link.append(i, element("span", label));
+    link.append(i);
     nav.append(link);
   }
   document.body.append(nav);
@@ -120,8 +123,10 @@ function setAccountLinks(user) {
     const icon = link.querySelector("i");
     link.replaceChildren();
     if (link.closest(".app-tabs")) {
-      if (icon) link.append(icon);
-      link.append(element("span", "บัญชี"));
+      // Profile tab shows the account's initial in a circle, like a profile photo.
+      link.setAttribute("aria-label", "บัญชีของฉัน");
+      link.title = "บัญชีของฉัน";
+      link.append(element("span", (user.name || "?").trim().charAt(0), "tab-avatar"));
       return;
     }
     if (icon) link.append(icon, " ");
