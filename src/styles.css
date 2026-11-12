@@ -1929,20 +1929,45 @@ body {
   }
 }
 
-/* Bottom dock, Instagram-style: icons only, filled icon on the current page, profile circle last. */
+/* Bottom dock, Instagram-style: a floating capsule, icons only, filled icon on the current page. */
 :root {
-  --dock-h: 50px;
+  --dock-h: 58px;
+  --dock-gap: 12px;
 }
 .bottom-nav,
 .dark-mode .bottom-nav {
+  left: 50%;
+  right: auto;
+  bottom: calc(var(--dock-gap) + var(--safe-b));
+  width: min(88vw, 400px);
+  height: var(--dock-h);
   grid-auto-columns: 1fr;
-  padding: 0 4px var(--safe-b);
-  box-shadow: none;
-  border-top: 0.5px solid rgba(0, 0, 0, 0.15);
+  gap: 2px;
+  padding: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 0.5px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.08);
+  transform: translate3d(-50%, 0, 0);
 }
 .dark-mode .bottom-nav {
-  background: #000;
-  border-top-color: rgba(255, 255, 255, 0.15);
+  background: rgba(38, 38, 38, 0.96);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+}
+@media (max-width: 959.98px) {
+  .screen {
+    padding-bottom: calc(var(--dock-h) + var(--dock-gap) + var(--safe-b) + 24px);
+  }
+}
+.bottom-nav .nav-item {
+  border-radius: 999px;
+}
+.bottom-nav .nav-item.active {
+  background: rgba(0, 0, 0, 0.07);
+}
+.dark-mode .bottom-nav .nav-item.active {
+  background: rgba(255, 255, 255, 0.12);
 }
 .bottom-nav .nav-item,
 .bottom-nav .nav-item.active,

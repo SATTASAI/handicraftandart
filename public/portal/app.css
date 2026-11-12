@@ -9,7 +9,8 @@
   --app-bg: #f4f6fb;
   --app-radius: 18px;
   --app-shadow: 0 6px 24px rgba(1, 41, 112, .07);
-  --app-tab-h: 50px;
+  --app-tab-h: 58px;
+  --app-tab-gap: 12px;
 }
 body {
   background: var(--app-bg);
@@ -110,7 +111,7 @@ body.dark-mode .home-hero .hero-title {
 @media (max-width: 991.98px) {
   body {
     font-size: 15px;
-    padding-bottom: calc(var(--app-tab-h) + env(safe-area-inset-bottom) + 12px) !important;
+    padding-bottom: calc(var(--app-tab-h) + var(--app-tab-gap) + env(safe-area-inset-bottom) + 12px) !important;
   }
 
   /* Top app bar: logo + event name; navigation moves to the tab bar. */
@@ -234,7 +235,7 @@ body.dark-mode .home-hero .hero-title {
   .cookie-banner {
     left: 10px !important;
     right: 10px !important;
-    bottom: calc(var(--app-tab-h) + env(safe-area-inset-bottom) + 10px) !important;
+    bottom: calc(var(--app-tab-h) + var(--app-tab-gap) + env(safe-area-inset-bottom) + 10px) !important;
     max-width: none !important;
     width: auto !important;
     transform: none !important;
@@ -245,23 +246,28 @@ body.dark-mode .home-hero .hero-title {
   }
 
   /* Bottom tab bar, Instagram-style: icons only, filled icon for the current page. */
+  /* Floating capsule above the bottom edge, like Instagram's current tab bar. */
   .app-tabs {
     position: fixed;
     z-index: 1030;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    left: 50%;
+    bottom: calc(var(--app-tab-gap) + env(safe-area-inset-bottom));
+    width: min(88vw, 400px);
+    height: var(--app-tab-h);
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    height: calc(var(--app-tab-h) + env(safe-area-inset-bottom));
-    padding: 0 4px env(safe-area-inset-bottom);
-    background: var(--app-card);
-    border-top: .5px solid rgba(0, 0, 0, .15);
-    transform: translateZ(0);
+    gap: 2px;
+    padding: 5px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .96);
+    border: .5px solid rgba(0, 0, 0, .08);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .14), 0 1px 3px rgba(0, 0, 0, .08);
+    transform: translate3d(-50%, 0, 0);
   }
   body.dark-mode .app-tabs {
-    background: #000;
-    border-top-color: rgba(255, 255, 255, .15);
+    background: rgba(38, 38, 38, .96);
+    border-color: rgba(255, 255, 255, .1);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .5);
   }
   .app-tabs a {
     display: flex;
@@ -274,7 +280,14 @@ body.dark-mode .home-hero .hero-title {
     -webkit-tap-highlight-color: transparent;
     -webkit-user-select: none;
     user-select: none;
-    transition: transform .08s, opacity .12s;
+    border-radius: 999px;
+    transition: transform .08s, opacity .12s, background-color .15s;
+  }
+  .app-tabs a[aria-current="page"] {
+    background: rgba(0, 0, 0, .07);
+  }
+  body.dark-mode .app-tabs a[aria-current="page"] {
+    background: rgba(255, 255, 255, .12);
   }
   body.dark-mode .app-tabs a {
     color: #fff !important;
@@ -306,7 +319,7 @@ body.dark-mode .home-hero .hero-title {
 @media (max-width: 991.98px) {
   /* Keep the back-to-top button clear of the tab bar. */
   .back-to-top {
-    bottom: calc(var(--app-tab-h) + env(safe-area-inset-bottom) + 12px) !important;
+    bottom: calc(var(--app-tab-h) + var(--app-tab-gap) + env(safe-area-inset-bottom) + 12px) !important;
     right: 14px !important;
     border-radius: 50% !important;
     z-index: 1029 !important;
