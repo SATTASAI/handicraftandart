@@ -1841,3 +1841,73 @@ h3 {
   border-color: #2f6b4a;
   color: #a6e3c0;
 }
+
+/* ---------- App polish (matches the portal's phone layout) ---------- */
+:root {
+  --radius-m: 18px;
+  --radius-l: 22px;
+}
+body {
+  -webkit-font-smoothing: antialiased;
+  background: var(--surface);
+}
+.screen {
+  padding-inline: 14px;
+}
+.panel,
+.tile,
+.list-group,
+.install-card {
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 24px rgba(1, 41, 112, 0.07);
+}
+.panel {
+  padding: 18px 16px;
+}
+.panel h1 {
+  font-size: 20px;
+}
+.panel h2 {
+  font-size: 17px;
+}
+.tile {
+  padding: 16px 14px;
+  gap: 6px;
+}
+.tile strong {
+  font-size: 15px;
+  font-weight: 600;
+}
+.tile small {
+  color: var(--ink-soft);
+}
+.hello-card h1 {
+  font-size: 22px;
+  font-weight: 600;
+}
+.bottom-nav {
+  background: color-mix(in srgb, var(--white) 92%, transparent);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+}
+.nav-item {
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+.nav-item.active {
+  font-weight: 600;
+}
+.bottom-nav .nav-item.active .icon {
+  background: rgba(65, 84, 241, 0.12);
+}
+.dark-mode .bottom-nav .nav-item.active .icon {
+  background: rgba(110, 164, 255, 0.16);
+}
+.list-row {
+  padding-block: 14px;
+}
+@media (min-width: 960px) {
+  .screen {
+    padding-inline: 28px;
+  }
+}
