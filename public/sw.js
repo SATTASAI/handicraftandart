@@ -1,6 +1,6 @@
 // Service worker: caches only the public app shell and hashed build assets.
 // Never caches /api/ responses, rule PDFs or anything authenticated.
-const CACHE = "hca-shell-v4";
+const CACHE = "hca-shell-v5";
 const SHELL = ["/", "/workspace", "/manifest.webmanifest", "/icons/icon-192.png"];
 
 self.addEventListener("install", (event) => {
